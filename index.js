@@ -1,6 +1,6 @@
 // youtube-to-mp3-api/index.js
 const express = require('express');
-const ytdl = require('ytdl-core');
+const youtubedl = require('youtube-dl-exec');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
@@ -24,6 +24,11 @@ const tempFiles = new Map();
 // Middleware para analisar JSON
 app.use(express.json());
 
+// Função para validar URL do YouTube
+function validateYouTubeUrl(url) {
+  return url.includes('youtube.com/') || url.includes('youtu.be/');
+}
+
 // Rota principal - recebe a URL do YouTube
 app.post('/convert', async (req, res) => {
   try {
@@ -34,77 +39,95 @@ app.post('/convert', async (req, res) => {
     }
     
     // Validar a URL do YouTube
-    if (!ytdl.validateURL(youtubeUrl)) {
+    if (!validateYouTubeUrl(youtubeUrl)) {
       return res.status(400).json({ error: 'URL do YouTube inválida' });
     }
     
-    // Obter informações do vídeo
-    const videoInfo = await ytdl.getInfo(youtubeUrl);
-    const videoTitle = videoInfo.videoDetails.title;
-    const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
+    console.log('Processando URL:', youtubeUrl);
     
     // Gerar ID único para o arquivo
     const fileId = uuidv4();
     const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
     const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
     
-    // Baixar o vídeo
-    const videoStream = ytdl(youtubeUrl, { quality: 'highestaudio' });
-    const videoWriteStream = fs.createWriteStream(videoPath);
+    // Obter informações do vídeo usando youtube-dl
+    console.log('Buscando informações do vídeo...');
+    const videoInfo = await youtubedl(youtubeUrl, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      noCallHome: true,
+      preferFreeFormats: true,
+      youtubeSkipDashManifest: true
+    });
     
-    videoStream.pipe(videoWriteStream);
+    const videoTitle = videoInfo.title;
+    const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
+    console.log(`Título do vídeo: ${videoTitle}`);
     
-    videoWriteStream.on('finish', () => {
-      // Converter para MP3 usando ffmpeg
-      ffmpeg(videoPath)
-        .outputOptions('-q:a', '0') // Melhor qualidade
-        .saveToFile(audioPath)
-        .on('end', () => {
-          // Remover o arquivo de vídeo após a conversão
+    // Baixar o vídeo usando youtube-dl
+    console.log('Baixando o vídeo...');
+    await youtubedl(youtubeUrl, {
+      output: videoPath,
+      format: 'bestaudio[ext=m4a]/bestaudio'
+    });
+    
+    console.log('Vídeo baixado com sucesso. Iniciando conversão para MP3...');
+    
+    // Converter para MP3 usando ffmpeg
+    ffmpeg(videoPath)
+      .outputOptions('-q:a', '0') // Melhor qualidade
+      .saveToFile(audioPath)
+      .on('progress', (progress) => {
+        console.log(`Progresso da conversão: ${progress.percent}% concluído`);
+      })
+      .on('end', () => {
+        console.log('Conversão para MP3 concluída com sucesso');
+        
+        // Remover o arquivo de vídeo após a conversão
+        try {
           fs.unlinkSync(videoPath);
-          
-          // Gerar URL para download
-          const downloadUrl = `/download/${fileId}`;
-          
-          // Armazenar informações do arquivo
-          tempFiles.set(fileId, {
-            path: audioPath,
-            filename: `${sanitizedTitle}.mp3`,
-            expiresAt: Date.now() + EXPIRATION_TIME
-          });
-          
-          // Configurar limpeza do arquivo após o tempo de expiração
-          setTimeout(() => {
-            if (tempFiles.has(fileId)) {
-              const fileInfo = tempFiles.get(fileId);
-              if (fs.existsSync(fileInfo.path)) {
-                fs.unlinkSync(fileInfo.path);
-              }
-              tempFiles.delete(fileId);
-            }
-          }, EXPIRATION_TIME);
-          
-          res.json({
-            success: true,
-            title: videoTitle,
-            downloadUrl: downloadUrl,
-            expiresIn: 'Uma hora',
-          });
-        })
-        .on('error', (err) => {
-          console.error('Erro na conversão:', err);
-          res.status(500).json({ error: 'Erro ao converter o vídeo' });
+          console.log('Arquivo de vídeo temporário removido');
+        } catch (err) {
+          console.error('Erro ao remover arquivo de vídeo temporário:', err);
+        }
+        
+        // Gerar URL para download
+        const downloadUrl = `/download/${fileId}`;
+        
+        // Armazenar informações do arquivo
+        tempFiles.set(fileId, {
+          path: audioPath,
+          filename: `${sanitizedTitle}.mp3`,
+          expiresAt: Date.now() + EXPIRATION_TIME
         });
-    });
-    
-    videoWriteStream.on('error', (err) => {
-      console.error('Erro ao baixar o vídeo:', err);
-      res.status(500).json({ error: 'Erro ao baixar o vídeo' });
-    });
-    
+        
+        // Configurar limpeza do arquivo após o tempo de expiração
+        setTimeout(() => {
+          if (tempFiles.has(fileId)) {
+            const fileInfo = tempFiles.get(fileId);
+            if (fs.existsSync(fileInfo.path)) {
+              fs.unlinkSync(fileInfo.path);
+              console.log(`Arquivo expirado removido: ${fileId}`);
+            }
+            tempFiles.delete(fileId);
+          }
+        }, EXPIRATION_TIME);
+        
+        res.json({
+          success: true,
+          title: videoTitle,
+          downloadUrl: downloadUrl,
+          expiresIn: 'Uma hora',
+        });
+      })
+      .on('error', (err) => {
+        console.error('Erro na conversão para MP3:', err);
+        res.status(500).json({ error: 'Erro ao converter o vídeo', details: err.message });
+      });
+      
   } catch (error) {
-    console.error('Erro:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('Erro no processamento:', error);
+    res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
   }
 });
 
@@ -151,12 +174,19 @@ app.listen(PORT, () => {
 // Limpar arquivos temporários periodicamente
 setInterval(() => {
   const now = Date.now();
+  let countRemoved = 0;
+  
   for (const [fileId, fileInfo] of tempFiles.entries()) {
     if (now > fileInfo.expiresAt) {
       if (fs.existsSync(fileInfo.path)) {
         fs.unlinkSync(fileInfo.path);
+        countRemoved++;
       }
       tempFiles.delete(fileId);
     }
+  }
+  
+  if (countRemoved > 0) {
+    console.log(`Limpeza automática: ${countRemoved} arquivo(s) expirado(s) removido(s)`);
   }
 }, 15 * 60 * 1000); // Verificar a cada 15 minutos

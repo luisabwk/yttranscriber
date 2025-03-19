@@ -1,5 +1,5 @@
 {
-  "name": "youtube-to-mp3-api",
+  "name": "yt2mp3",
   "version": "1.0.0",
   "description": "API para baixar vídeos do YouTube e converter para MP3",
   "main": "index.js",

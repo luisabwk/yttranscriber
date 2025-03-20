@@ -1,6 +1,6 @@
 # YouTube to MP3 API
 
-Uma API simples e eficiente para baixar vídeos do YouTube, extrair o áudio em formato MP3 e disponibilizar através de URLs temporárias.
+Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em formato MP3 e disponibilizar através de URLs temporárias.
 
 ![YouTube to MP3](https://img.shields.io/badge/YouTube-MP3-red)
 ![Node.js](https://img.shields.io/badge/Node.js-14%2B-green)
@@ -8,7 +8,8 @@ Uma API simples e eficiente para baixar vídeos do YouTube, extrair o áudio em 
 
 ## ✨ Características
 
-- ⬇️ Download de vídeos do YouTube
+- ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback
+- 🍪 Suporte a autenticação do YouTube via cookies do navegador
 - 🎵 Conversão para MP3 em alta qualidade
 - 🔗 URLs temporárias para download
 - ⏱️ Expiração automática após 1 hora
@@ -19,6 +20,8 @@ Uma API simples e eficiente para baixar vídeos do YouTube, extrair o áudio em 
 - Node.js (versão 14 ou superior)
 - npm ou yarn
 - FFmpeg instalado no sistema
+- Google Chrome (para autenticação com o YouTube)
+- yt-dlp (instalado automaticamente pelo script de setup)
 
 ## 🔧 Instalação
 
@@ -29,34 +32,41 @@ git clone https://github.com/seu-usuario/youtube-to-mp3-api.git
 cd youtube-to-mp3-api
 ```
 
-### 2. Instale as dependências
+### 2. Executar o script de instalação automatizado (Linux/Ubuntu)
+
+Este script instalará todas as dependências necessárias, incluindo FFmpeg, yt-dlp, Google Chrome e configurará o ambiente.
 
 ```bash
-npm install
+chmod +x setup.sh
+sudo ./setup.sh
 ```
 
-### 3. Instale o FFmpeg (se ainda não tiver)
+Ou use o comando npm:
 
-#### Windows:
-1. Baixe o FFmpeg de https://ffmpeg.org/download.html
-2. Extraia os arquivos para uma pasta (ex: C:\ffmpeg)
-3. Adicione o caminho para a pasta bin (ex: C:\ffmpeg\bin) ao PATH do sistema
-
-#### macOS:
 ```bash
-brew install ffmpeg
+sudo npm run setup
 ```
 
-#### Linux (Ubuntu/Debian):
+### 3. Fazer login no YouTube
+
+Para superar as restrições anti-bot do YouTube, você precisa fazer login em uma conta do YouTube no Chrome instalado no servidor:
+
 ```bash
-sudo apt update
-sudo apt install ffmpeg
+google-chrome --no-sandbox https://youtube.com
 ```
+
+Após fazer login, feche o navegador. Os cookies serão armazenados e utilizados automaticamente pela API.
 
 ### 4. Inicie o servidor
 
 ```bash
-npm start
+pm2 start index.js --name yt2mp3
+```
+
+Para verificar os logs:
+
+```bash
+pm2 logs yt2mp3
 ```
 
 Por padrão, o servidor iniciará na porta 3000. Você pode alterar isso definindo a variável de ambiente `PORT`.
@@ -97,7 +107,9 @@ Use a URL fornecida na resposta anterior para baixar o arquivo MP3.
 **Resposta:**
 ```json
 {
-  "status": "online"
+  "status": "online",
+  "version": "1.1.0",
+  "message": "API funcionando normalmente"
 }
 ```
 
@@ -144,25 +156,43 @@ convertAndDownload('https://www.youtube.com/watch?v=exemplo', './musica.mp3')
 youtube-to-mp3-api/
 ├── index.js          # Arquivo principal da API
 ├── package.json      # Dependências e scripts
+├── setup.sh          # Script de instalação e configuração
 └── temp/             # Diretório para arquivos temporários (criado automaticamente)
 ```
 
+## 🔄 Como funciona o sistema de fallback
+
+Esta versão aprimorada da API utiliza um sistema de múltiplas abordagens para garantir o download mesmo quando o YouTube restringe acessos:
+
+1. **Abordagem 1**: Utiliza cookies do navegador Chrome (requer login manual uma vez)
+2. **Abordagem 2**: Tenta o download através do YouTube Music (às vezes tem menos restrições)
+3. **Abordagem 3**: Utiliza configurações avançadas e formatos alternativos
+4. **Abordagem 4**: Tenta download através de um front-end alternativo (Invidious)
+
+Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downloads.
+
 ## 📝 Notas importantes
 
+- A API agora requer login no YouTube através do Chrome no servidor para funcionar corretamente.
 - Os arquivos são automaticamente excluídos após uma hora para economizar espaço em disco.
 - Esta API é apenas para uso educacional. Respeite os direitos autorais e os termos de serviço do YouTube.
 - Considere implementar autenticação e limitação de taxa (rate limiting) em ambientes de produção.
 
 ## 🔧 Solução de problemas
 
-### Erro "FFmpeg não encontrado"
-Certifique-se de que o FFmpeg está instalado e disponível no PATH do sistema.
+### Erro "Sign in to confirm you're not a bot"
+Esta versão resolve esse problema usando cookies do Chrome. Certifique-se de:
+- Ter executado o script setup.sh
+- Ter feito login manualmente no YouTube usando o Chrome do servidor
 
-### Erro ao baixar vídeos
-Verifique se a URL do YouTube é válida e se o vídeo está disponível publicamente.
+### Erro "FFmpeg não encontrado"
+Certifique-se de que o FFmpeg está instalado corretamente:
+```bash
+ffmpeg -version
+```
 
 ### Processo de conversão lento
-O tempo de processamento depende do tamanho do vídeo original.
+O tempo de processamento depende do tamanho do vídeo original e da capacidade do servidor.
 
 ## 🚀 Possíveis melhorias
 
@@ -170,12 +200,3 @@ O tempo de processamento depende do tamanho do vídeo original.
 - [ ] Implementar limitação de taxa (rate limiting)
 - [ ] Adicionar suporte para diferentes formatos de áudio
 - [ ] Criar um sistema de fila para processar múltiplas solicitações
-- [ ] Implementar um frontend web para interface de usuário
-
-## 📄 Licença
-
-Este projeto está licenciado sob a [Licença MIT](LICENSE).
-
-## ⚠️ Aviso legal
-
-Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a permissão dos detentores dos direitos pode violar leis de direitos autorais. Os usuários são responsáveis por garantir que seu uso desta API esteja em conformidade com as leis e regulamentos aplicáveis.

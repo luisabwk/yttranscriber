@@ -22,16 +22,6 @@ pip3 install --upgrade yt-dlp
 # Criar link simbólico para garantir que yt-dlp esteja no PATH
 ln -sf /usr/local/bin/yt-dlp /usr/bin/yt-dlp
 
-echo "==== Instalando Google Chrome (para autenticação de cookies) ===="
-cd /tmp
-wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-apt install -y ./google-chrome-stable_current_amd64.deb
-rm ./google-chrome-stable_current_amd64.deb
-
-echo "==== Verificando instalação do Chrome ===="
-CHROME_VERSION=$(google-chrome --version)
-echo "Chrome instalado: $CHROME_VERSION"
-
 echo "==== Verificando Node.js ===="
 if ! command -v node &> /dev/null; then
     echo "Node.js não encontrado, instalando..."
@@ -55,18 +45,15 @@ chmod 777 temp
 echo "==== Instalando dependências Node.js ===="
 npm install
 
-echo "==== Etapa final: instruções para login no YouTube ===="
-echo ""
-echo "==================================================================="
-echo "IMPORTANTE: É necessário fazer login no YouTube para obter cookies"
-echo "==================================================================="
-echo ""
-echo "Execute os seguintes comandos para fazer login no YouTube:"
-echo ""
-echo "1. Execute: google-chrome --no-sandbox https://youtube.com"
-echo "2. Faça login na sua conta do YouTube"
-echo "3. Feche o navegador após o login"
-echo ""
+echo "==== Criando arquivo de configuração yt-dlp ===="
+cat > .ytdlp-config << 'EOFCONFIG'
+--no-check-certificate
+--geo-bypass
+--ignore-errors
+--no-cache-dir
+--no-youtube-login
+--extractor-args youtube:skip_webpage=True
+EOFCONFIG
 
 echo "==== Configuração completa! ===="
 echo ""

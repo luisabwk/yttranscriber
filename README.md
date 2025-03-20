@@ -9,19 +9,18 @@ Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em 
 ## ✨ Características
 
 - ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback
-- 🍪 Suporte a autenticação do YouTube via cookies do navegador
 - 🎵 Conversão para MP3 em alta qualidade
 - 🔗 URLs temporárias para download
 - ⏱️ Expiração automática após 1 hora
 - 🧹 Limpeza automática de arquivos temporários
+- 🛡️ Sistema avançado de contorno de restrições anti-bot
 
 ## 📋 Pré-requisitos
 
 - Node.js (versão 14 ou superior)
 - npm ou yarn
 - FFmpeg instalado no sistema
-- Google Chrome (para autenticação com o YouTube)
-- yt-dlp (instalado automaticamente pelo script de setup)
+- Python 3 e pip (para yt-dlp)
 
 ## 🔧 Instalação
 
@@ -34,7 +33,7 @@ cd youtube-to-mp3-api
 
 ### 2. Executar o script de instalação automatizado (Linux/Ubuntu)
 
-Este script instalará todas as dependências necessárias, incluindo FFmpeg, yt-dlp, Google Chrome e configurará o ambiente.
+Este script instalará todas as dependências necessárias, incluindo FFmpeg, yt-dlp, e configurará o ambiente.
 
 ```bash
 chmod +x setup.sh
@@ -47,17 +46,7 @@ Ou use o comando npm:
 sudo npm run setup
 ```
 
-### 3. Fazer login no YouTube
-
-Para superar as restrições anti-bot do YouTube, você precisa fazer login em uma conta do YouTube no Chrome instalado no servidor:
-
-```bash
-google-chrome --no-sandbox https://youtube.com
-```
-
-Após fazer login, feche o navegador. Os cookies serão armazenados e utilizados automaticamente pela API.
-
-### 4. Inicie o servidor
+### 3. Inicie o servidor
 
 ```bash
 pm2 start index.js --name yt2mp3
@@ -157,23 +146,23 @@ youtube-to-mp3-api/
 ├── index.js          # Arquivo principal da API
 ├── package.json      # Dependências e scripts
 ├── setup.sh          # Script de instalação e configuração
+├── .ytdlp-config     # Configuração do yt-dlp (criado automaticamente)
 └── temp/             # Diretório para arquivos temporários (criado automaticamente)
 ```
 
-## 🔄 Como funciona o sistema de fallback
+## 🔄 Sistema de contorno de restrições
 
 Esta versão aprimorada da API utiliza um sistema de múltiplas abordagens para garantir o download mesmo quando o YouTube restringe acessos:
 
-1. **Abordagem 1**: Utiliza cookies do navegador Chrome (requer login manual uma vez)
-2. **Abordagem 2**: Tenta o download através do YouTube Music (às vezes tem menos restrições)
-3. **Abordagem 3**: Utiliza configurações avançadas e formatos alternativos
-4. **Abordagem 4**: Tenta download através de um front-end alternativo (Invidious)
+1. **Abordagem 1**: Utiliza alternativas do Invidious (front-ends alternativos do YouTube)
+2. **Abordagem 2**: Tenta configurações avançadas para yt-dlp que contornam restrições
+3. **Abordagem 3**: Utiliza o YouTube Music como alternativa (às vezes tem menos restrições)
+4. **Abordagem 4**: Tenta download através do Piped.video (outro front-end alternativo)
 
-Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downloads.
+Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downloads, mesmo com as restrições anti-bot do YouTube.
 
 ## 📝 Notas importantes
 
-- A API agora requer login no YouTube através do Chrome no servidor para funcionar corretamente.
 - Os arquivos são automaticamente excluídos após uma hora para economizar espaço em disco.
 - Esta API é apenas para uso educacional. Respeite os direitos autorais e os termos de serviço do YouTube.
 - Considere implementar autenticação e limitação de taxa (rate limiting) em ambientes de produção.
@@ -181,9 +170,9 @@ Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downlo
 ## 🔧 Solução de problemas
 
 ### Erro "Sign in to confirm you're not a bot"
-Esta versão resolve esse problema usando cookies do Chrome. Certifique-se de:
-- Ter executado o script setup.sh
-- Ter feito login manualmente no YouTube usando o Chrome do servidor
+Esta versão resolve esse problema usando alternativas como Invidious e Piped, que não requerem autenticação. Se ainda encontrar esse erro:
+- Verifique se o yt-dlp está atualizado: `pip install -U yt-dlp`
+- Tente usar outro vídeo como teste, pois alguns têm restrições específicas
 
 ### Erro "FFmpeg não encontrado"
 Certifique-se de que o FFmpeg está instalado corretamente:
@@ -200,3 +189,13 @@ O tempo de processamento depende do tamanho do vídeo original e da capacidade d
 - [ ] Implementar limitação de taxa (rate limiting)
 - [ ] Adicionar suporte para diferentes formatos de áudio
 - [ ] Criar um sistema de fila para processar múltiplas solicitações
+- [ ] Implementar cache para vídeos frequentemente solicitados
+- [ ] Criar um frontend web para interface de usuário
+
+## 📄 Licença
+
+Este projeto está licenciado sob a [Licença MIT](LICENSE).
+
+## ⚠️ Aviso legal
+
+Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a permissão dos detentores dos direitos pode violar leis de direitos autorais. Os usuários são responsáveis por garantir que seu uso desta API esteja em conformidade com as leis e regulamentos aplicáveis.

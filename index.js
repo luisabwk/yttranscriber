@@ -75,95 +75,123 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  // Abordagem 1: Usar cookies do Chrome
+  // Nova Abordagem 1: Tentar proxy Invidious primeiro (não requer login)
   try {
-    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Cookies do navegador`);
-    const browserOptions = [
-      '--extract-audio',
-      '--audio-format', 'mp3',
-      '--audio-quality', '0',
-      '--no-warnings',
-      '--cookies-from-browser', 'chrome',
-      '--no-check-certificate',
-      '--geo-bypass',
-      '--ignore-errors',
-      '--force-ipv4',
-      '-o', outputTemplate,
-      youtubeUrl
+    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Invidious`);
+    // Extrair ID do vídeo
+    let videoId = '';
+    if (youtubeUrl.includes('youtube.com/watch?v=')) {
+      videoId = new URL(youtubeUrl).searchParams.get('v');
+    } else if (youtubeUrl.includes('youtu.be/')) {
+      videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
+    }
+    
+    if (!videoId) {
+      throw new Error('Não foi possível extrair o ID do vídeo');
+    }
+    
+    // Lista de instâncias Invidious para tentar
+    const invidiousInstances = [
+      'yewtu.be',
+      'invidious.snopyta.org',
+      'vid.puffyan.us',
+      'invidious.kavin.rocks',
+      'invidious.namazso.eu',
+      'inv.riverside.rocks'
     ];
     
-    await executeYtDlp(browserOptions);
-    console.log(`[${new Date().toISOString()}] Abordagem 1 bem-sucedida!`);
-    return { success: true };
-  } catch (error) {
-    console.log(`[${new Date().toISOString()}] Abordagem 1 falhou: ${error.message}`);
+    // Tentar cada instância
+    for (const instance of invidiousInstances) {
+      try {
+        const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
+        console.log(`[${new Date().toISOString()}] Usando URL do Invidious: ${invidiousUrl}`);
+        
+        const invidiousOptions = [
+          '--extract-audio',
+          '--audio-format', 'mp3',
+          '--audio-quality', '0',
+          '--no-warnings',
+          '--no-check-certificate',
+          '--geo-bypass',
+          '--ignore-errors',
+          '-o', outputTemplate,
+          invidiousUrl
+        ];
+        
+        await executeYtDlp(invidiousOptions);
+        console.log(`[${new Date().toISOString()}] Download com ${instance} bem-sucedido!`);
+        return { success: true };
+      } catch (err) {
+        console.log(`[${new Date().toISOString()}] Falha com ${instance}: ${err.message}`);
+        // Continue para a próxima instância
+      }
+    }
     
-    // Abordagem 2: Tentar YouTube Music (às vezes tem menos restrições)
+    throw new Error('Todas as instâncias Invidious falharam');
+  } catch (error) {
+    console.log(`[${new Date().toISOString()}] Abordagem 1 (Invidious) falhou: ${error.message}`);
+    
+    // Abordagem 2: Tentar com o modo nativo e configurações avançadas
     try {
-      console.log(`[${new Date().toISOString()}] Tentando abordagem 2: API alternativa`);
-      const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
-      console.log(`[${new Date().toISOString()}] Usando URL do YouTube Music: ${ytMusicUrl}`);
-      
-      const ytMusicOptions = [
+      console.log(`[${new Date().toISOString()}] Tentando abordagem 2: Configurações avançadas`);
+      const advancedOptions = [
         '--extract-audio',
         '--audio-format', 'mp3',
         '--audio-quality', '0',
         '--no-warnings',
+        '--format', 'bestaudio[ext=m4a]/bestaudio/best',
         '--no-check-certificate',
         '--geo-bypass',
         '--ignore-errors',
-        '--force-ipv4',
+        '--no-playlist',
+        '--no-youtube-login',
+        '--extractor-args', 'youtube:skip_webpage=True',
         '-o', outputTemplate,
-        ytMusicUrl
+        youtubeUrl
       ];
       
-      await executeYtDlp(ytMusicOptions);
+      await executeYtDlp(advancedOptions);
       console.log(`[${new Date().toISOString()}] Abordagem 2 bem-sucedida!`);
       return { success: true };
     } catch (error2) {
       console.log(`[${new Date().toISOString()}] Abordagem 2 falhou: ${error2.message}`);
       
-      // Abordagem 3: Tentar com formatos específicos e configurações adicionais
+      // Abordagem 3: Tentar YouTube Music (às vezes tem menos restrições)
       try {
-        console.log(`[${new Date().toISOString()}] Tentando abordagem 3: Formatos específicos`);
-        const specificOptions = [
+        console.log(`[${new Date().toISOString()}] Tentando abordagem 3: YouTube Music`);
+        const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
+        console.log(`[${new Date().toISOString()}] Usando URL do YouTube Music: ${ytMusicUrl}`);
+        
+        const ytMusicOptions = [
           '--extract-audio',
           '--audio-format', 'mp3',
           '--audio-quality', '0',
           '--no-warnings',
-          '--format', 'bestaudio[ext=m4a]/bestaudio/best',
           '--no-check-certificate',
           '--geo-bypass',
           '--ignore-errors',
+          '--no-playlist',
+          '--no-youtube-login',
           '-o', outputTemplate,
-          youtubeUrl
+          ytMusicUrl
         ];
         
-        await executeYtDlp(specificOptions);
+        await executeYtDlp(ytMusicOptions);
         console.log(`[${new Date().toISOString()}] Abordagem 3 bem-sucedida!`);
         return { success: true };
       } catch (error3) {
         console.log(`[${new Date().toISOString()}] Abordagem 3 falhou: ${error3.message}`);
         
-        // Abordagem 4: Tentar proxy Invidious
+        // Abordagem 4: tentativa final com contorno extremo
         try {
-          console.log(`[${new Date().toISOString()}] Tentando abordagem 4: Proxy Invidious`);
-          // Extrair ID do vídeo
-          let videoId = '';
-          if (youtubeUrl.includes('youtube.com/watch?v=')) {
-            videoId = new URL(youtubeUrl).searchParams.get('v');
-          } else if (youtubeUrl.includes('youtu.be/')) {
-            videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
-          }
+          console.log(`[${new Date().toISOString()}] Tentando abordagem 4: Contorno extremo`);
+          // Configuração com flags experimentais para contornar restrições
           
-          if (!videoId) {
-            throw new Error('Não foi possível extrair o ID do vídeo');
-          }
+          // Tentar com piped.video (outro front-end alternativo)
+          const pipedUrl = `https://piped.video/watch?v=${videoId}`;
+          console.log(`[${new Date().toISOString()}] Usando URL do Piped: ${pipedUrl}`);
           
-          const invidiousUrl = `https://invidious.snopyta.org/watch?v=${videoId}`;
-          console.log(`[${new Date().toISOString()}] Usando URL do Invidious: ${invidiousUrl}`);
-          
-          const invidiousOptions = [
+          const pipedOptions = [
             '--extract-audio',
             '--audio-format', 'mp3',
             '--audio-quality', '0',
@@ -171,11 +199,15 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
             '--no-check-certificate',
             '--geo-bypass',
             '--ignore-errors',
+            '--no-playlist',
+            '--no-youtube-login',
+            '--extractor-args', 'youtube:skip_webpage=True',
+            '--force-ipv4',
             '-o', outputTemplate,
-            invidiousUrl
+            pipedUrl
           ];
           
-          await executeYtDlp(invidiousOptions);
+          await executeYtDlp(pipedOptions);
           console.log(`[${new Date().toISOString()}] Abordagem 4 bem-sucedida!`);
           return { success: true };
         } catch (error4) {
@@ -192,26 +224,50 @@ async function getVideoInfo(youtubeUrl) {
   try {
     console.log(`[${new Date().toISOString()}] Buscando informações do vídeo: ${youtubeUrl}`);
     
-    // Primeiro, tente com cookies do navegador
+    // Extrair ID do vídeo
+    let videoId = '';
+    if (youtubeUrl.includes('youtube.com/watch?v=')) {
+      videoId = new URL(youtubeUrl).searchParams.get('v');
+    } else if (youtubeUrl.includes('youtu.be/')) {
+      videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
+    }
+    
+    if (!videoId) {
+      throw new Error('Não foi possível extrair o ID do vídeo');
+    }
+    
+    // Primeiro, tente obter informações através do Invidious (não requer login)
     try {
-      const info = await youtubedl(youtubeUrl, {
+      console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
+      
+      const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
+      const info = await youtubedl(invidiousUrl, {
         dumpSingleJson: true,
         noWarnings: true,
         noCallHome: true,
-        cookiesFromBrowser: 'chrome'
+        noCheckCertificate: true,
+        geoBypass: true,
+        noPlaylist: true
       });
+      
       return info;
     } catch (err) {
-      console.log(`[${new Date().toISOString()}] Falha ao obter informações com cookies do navegador: ${err.message}`);
+      console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err.message}`);
       
-      // Tente sem cookies como fallback
+      // Tente diretamente com flags especiais como fallback
       const info = await youtubedl(youtubeUrl, {
         dumpSingleJson: true,
         noWarnings: true,
         noCallHome: true,
         preferFreeFormats: true,
-        youtubeSkipDashManifest: true
+        youtubeSkipDashManifest: true,
+        noCheckCertificate: true,
+        geoBypass: true,
+        noPlaylist: true,
+        skipDownload: true,
+        noYoutubeDatetime: true
       });
+      
       return info;
     }
   } catch (error) {
@@ -219,7 +275,7 @@ async function getVideoInfo(youtubeUrl) {
     
     // Se não conseguir obter informações, retorne um objeto com título genérico
     return {
-      title: `YouTube Video - ${new URL(youtubeUrl).searchParams.get('v') || 'Unknown'}`
+      title: `YouTube Video - ${videoId || 'Unknown'}`
     };
   }
 }

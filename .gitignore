@@ -1,0 +1,13 @@
+# Diretórios
+node_modules/
+temp/
+logs/
+
+# Arquivos
+.env
+.DS_Store
+*.log
+
+# Arquivos de cookies e sessões
+*.cookies
+cookies.txt

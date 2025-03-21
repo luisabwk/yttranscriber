@@ -75,123 +75,122 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  // Nova Abordagem 1: Tentar proxy Invidious primeiro (não requer login)
+  // Extrair ID do vídeo para uso em várias abordagens
+  let videoId = '';
+  if (youtubeUrl.includes('youtube.com/watch?v=')) {
+    videoId = new URL(youtubeUrl).searchParams.get('v');
+  } else if (youtubeUrl.includes('youtu.be/')) {
+    videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
+  }
+  
+  if (!videoId) {
+    throw new Error('Não foi possível extrair o ID do vídeo');
+  }
+  
+  // Abordagem 1: Usar proxy residencial iproyal
   try {
-    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Invidious`);
-    // Extrair ID do vídeo
-    let videoId = '';
-    if (youtubeUrl.includes('youtube.com/watch?v=')) {
-      videoId = new URL(youtubeUrl).searchParams.get('v');
-    } else if (youtubeUrl.includes('youtu.be/')) {
-      videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
-    }
+    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Residencial iProyal`);
     
-    if (!videoId) {
-      throw new Error('Não foi possível extrair o ID do vídeo');
-    }
+    // Configure o proxy com as credenciais fornecidas
+    const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
     
-    // Lista de instâncias Invidious para tentar
-    const invidiousInstances = [
-      'yewtu.be',
-      'invidious.snopyta.org',
-      'vid.puffyan.us',
-      'invidious.kavin.rocks',
-      'invidious.namazso.eu',
-      'inv.riverside.rocks'
+    const proxyOptions = [
+      '--extract-audio',
+      '--audio-format', 'mp3',
+      '--audio-quality', '0',
+      '--no-warnings',
+      '--proxy', proxyUrl,
+      '--no-check-certificate',
+      '--geo-bypass',
+      '--ignore-errors',
+      '-o', outputTemplate,
+      youtubeUrl
     ];
     
-    // Tentar cada instância
-    for (const instance of invidiousInstances) {
-      try {
-        const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
-        console.log(`[${new Date().toISOString()}] Usando URL do Invidious: ${invidiousUrl}`);
-        
-        const invidiousOptions = [
-          '--extract-audio',
-          '--audio-format', 'mp3',
-          '--audio-quality', '0',
-          '--no-warnings',
-          '--no-check-certificate',
-          '--geo-bypass',
-          '--ignore-errors',
-          '-o', outputTemplate,
-          invidiousUrl
-        ];
-        
-        await executeYtDlp(invidiousOptions);
-        console.log(`[${new Date().toISOString()}] Download com ${instance} bem-sucedido!`);
-        return { success: true };
-      } catch (err) {
-        console.log(`[${new Date().toISOString()}] Falha com ${instance}: ${err.message}`);
-        // Continue para a próxima instância
-      }
-    }
+    await executeYtDlp(proxyOptions);
+    console.log(`[${new Date().toISOString()}] Abordagem com proxy residencial bem-sucedida!`);
+    return { success: true };
+  } catch (errorProxy) {
+    console.log(`[${new Date().toISOString()}] Abordagem com proxy residencial falhou: ${errorProxy.message}`);
     
-    throw new Error('Todas as instâncias Invidious falharam');
-  } catch (error) {
-    console.log(`[${new Date().toISOString()}] Abordagem 1 (Invidious) falhou: ${error.message}`);
-    
-    // Abordagem 2: Tentar com o modo nativo e configurações avançadas
+    // Abordagem 2: Tentar proxy Invidious
     try {
-      console.log(`[${new Date().toISOString()}] Tentando abordagem 2: Configurações avançadas`);
-      const advancedOptions = [
-        '--extract-audio',
-        '--audio-format', 'mp3',
-        '--audio-quality', '0',
-        '--no-warnings',
-        '--format', 'bestaudio[ext=m4a]/bestaudio/best',
-        '--no-check-certificate',
-        '--geo-bypass',
-        '--ignore-errors',
-        '--no-playlist',
-        '--no-youtube-login',
-        '--extractor-args', 'youtube:skip_webpage=True',
-        '-o', outputTemplate,
-        youtubeUrl
+      console.log(`[${new Date().toISOString()}] Tentando abordagem 2: Proxy Invidious`);
+      
+      // Lista de instâncias Invidious para tentar
+      const invidiousInstances = [
+        'yewtu.be',
+        'invidious.snopyta.org',
+        'vid.puffyan.us',
+        'invidious.kavin.rocks',
+        'invidious.namazso.eu',
+        'inv.riverside.rocks'
       ];
       
-      await executeYtDlp(advancedOptions);
-      console.log(`[${new Date().toISOString()}] Abordagem 2 bem-sucedida!`);
-      return { success: true };
-    } catch (error2) {
-      console.log(`[${new Date().toISOString()}] Abordagem 2 falhou: ${error2.message}`);
+      // Tentar cada instância
+      for (const instance of invidiousInstances) {
+        try {
+          const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
+          console.log(`[${new Date().toISOString()}] Usando URL do Invidious: ${invidiousUrl}`);
+          
+          const invidiousOptions = [
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--no-warnings',
+            '--no-check-certificate',
+            '--geo-bypass',
+            '--ignore-errors',
+            '--proxy', proxyUrl, // Usar proxy residencial para Invidious também
+            '-o', outputTemplate,
+            invidiousUrl
+          ];
+          
+          await executeYtDlp(invidiousOptions);
+          console.log(`[${new Date().toISOString()}] Download com ${instance} bem-sucedido!`);
+          return { success: true };
+        } catch (err) {
+          console.log(`[${new Date().toISOString()}] Falha com ${instance}: ${err.message}`);
+          // Continue para a próxima instância
+        }
+      }
       
-      // Abordagem 3: Tentar YouTube Music (às vezes tem menos restrições)
+      throw new Error('Todas as instâncias Invidious falharam');
+    } catch (error3) {
+      console.log(`[${new Date().toISOString()}] Abordagem 2 (Invidious) falhou: ${error3.message}`);
+      
+      // Abordagem 3: Tentar com o modo nativo e configurações avançadas
       try {
-        console.log(`[${new Date().toISOString()}] Tentando abordagem 3: YouTube Music`);
-        const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
-        console.log(`[${new Date().toISOString()}] Usando URL do YouTube Music: ${ytMusicUrl}`);
-        
-        const ytMusicOptions = [
+        console.log(`[${new Date().toISOString()}] Tentando abordagem 3: Configurações avançadas`);
+        const advancedOptions = [
           '--extract-audio',
           '--audio-format', 'mp3',
           '--audio-quality', '0',
           '--no-warnings',
+          '--format', 'bestaudio[ext=m4a]/bestaudio/best',
           '--no-check-certificate',
           '--geo-bypass',
           '--ignore-errors',
           '--no-playlist',
-          '--no-youtube-login',
+          '--proxy', proxyUrl, // Usar proxy residencial
+          '--extractor-args', 'youtube:skip_webpage=True',
           '-o', outputTemplate,
-          ytMusicUrl
+          youtubeUrl
         ];
         
-        await executeYtDlp(ytMusicOptions);
+        await executeYtDlp(advancedOptions);
         console.log(`[${new Date().toISOString()}] Abordagem 3 bem-sucedida!`);
         return { success: true };
-      } catch (error3) {
-        console.log(`[${new Date().toISOString()}] Abordagem 3 falhou: ${error3.message}`);
+      } catch (error4) {
+        console.log(`[${new Date().toISOString()}] Abordagem 3 falhou: ${error4.message}`);
         
-        // Abordagem 4: tentativa final com contorno extremo
+        // Abordagem 4: Tentar YouTube Music
         try {
-          console.log(`[${new Date().toISOString()}] Tentando abordagem 4: Contorno extremo`);
-          // Configuração com flags experimentais para contornar restrições
+          console.log(`[${new Date().toISOString()}] Tentando abordagem 4: YouTube Music`);
+          const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
+          console.log(`[${new Date().toISOString()}] Usando URL do YouTube Music: ${ytMusicUrl}`);
           
-          // Tentar com piped.video (outro front-end alternativo)
-          const pipedUrl = `https://piped.video/watch?v=${videoId}`;
-          console.log(`[${new Date().toISOString()}] Usando URL do Piped: ${pipedUrl}`);
-          
-          const pipedOptions = [
+          const ytMusicOptions = [
             '--extract-audio',
             '--audio-format', 'mp3',
             '--audio-quality', '0',
@@ -200,19 +199,46 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
             '--geo-bypass',
             '--ignore-errors',
             '--no-playlist',
-            '--no-youtube-login',
-            '--extractor-args', 'youtube:skip_webpage=True',
-            '--force-ipv4',
+            '--proxy', proxyUrl, // Usar proxy residencial
             '-o', outputTemplate,
-            pipedUrl
+            ytMusicUrl
           ];
           
-          await executeYtDlp(pipedOptions);
+          await executeYtDlp(ytMusicOptions);
           console.log(`[${new Date().toISOString()}] Abordagem 4 bem-sucedida!`);
           return { success: true };
-        } catch (error4) {
-          console.log(`[${new Date().toISOString()}] Abordagem 4 falhou: ${error4.message}`);
-          throw new Error('Todas as abordagens de download falharam. O YouTube está bloqueando acessos automatizados.');
+        } catch (error5) {
+          console.log(`[${new Date().toISOString()}] Abordagem 4 falhou: ${error5.message}`);
+          
+          // Abordagem 5: tentativa final com Piped (outro front-end alternativo)
+          try {
+            console.log(`[${new Date().toISOString()}] Tentando abordagem 5: Piped.video`);
+            
+            const pipedUrl = `https://piped.video/watch?v=${videoId}`;
+            console.log(`[${new Date().toISOString()}] Usando URL do Piped: ${pipedUrl}`);
+            
+            const pipedOptions = [
+              '--extract-audio',
+              '--audio-format', 'mp3',
+              '--audio-quality', '0',
+              '--no-warnings',
+              '--no-check-certificate',
+              '--geo-bypass',
+              '--ignore-errors',
+              '--no-playlist',
+              '--proxy', proxyUrl, // Usar proxy residencial
+              '--force-ipv4',
+              '-o', outputTemplate,
+              pipedUrl
+            ];
+            
+            await executeYtDlp(pipedOptions);
+            console.log(`[${new Date().toISOString()}] Abordagem 5 bem-sucedida!`);
+            return { success: true };
+          } catch (error6) {
+            console.log(`[${new Date().toISOString()}] Abordagem 5 falhou: ${error6.message}`);
+            throw new Error('Todas as abordagens de download falharam. O YouTube está bloqueando acessos automatizados.');
+          }
         }
       }
     }
@@ -236,15 +262,18 @@ async function getVideoInfo(youtubeUrl) {
       throw new Error('Não foi possível extrair o ID do vídeo');
     }
     
-    // Primeiro, tente obter informações através do Invidious (não requer login)
+    // Configuração do proxy residencial
+    const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+    
+    // Primeira tentativa: usar proxy residencial
     try {
-      console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
+      console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial`);
       
-      const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
-      const info = await youtubedl(invidiousUrl, {
+      const info = await youtubedl(youtubeUrl, {
         dumpSingleJson: true,
         noWarnings: true,
         noCallHome: true,
+        proxy: proxyUrl,
         noCheckCertificate: true,
         geoBypass: true,
         noPlaylist: true
@@ -252,23 +281,48 @@ async function getVideoInfo(youtubeUrl) {
       
       return info;
     } catch (err) {
-      console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err.message}`);
+      console.log(`[${new Date().toISOString()}] Falha ao obter informações via proxy residencial: ${err.message}`);
       
-      // Tente diretamente com flags especiais como fallback
-      const info = await youtubedl(youtubeUrl, {
-        dumpSingleJson: true,
-        noWarnings: true,
-        noCallHome: true,
-        preferFreeFormats: true,
-        youtubeSkipDashManifest: true,
-        noCheckCertificate: true,
-        geoBypass: true,
-        noPlaylist: true,
-        skipDownload: true,
-        noYoutubeDatetime: true
-      });
-      
-      return info;
+      // Tentar através de Invidious como fallback
+      try {
+        console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
+        
+        const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
+        const info = await youtubedl(invidiousUrl, {
+          dumpSingleJson: true,
+          noWarnings: true,
+          noCallHome: true,
+          proxy: proxyUrl,
+          noCheckCertificate: true,
+          geoBypass: true,
+          noPlaylist: true
+        });
+        
+        return info;
+      } catch (err2) {
+        console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err2.message}`);
+        
+        // Tente diretamente com flags especiais como fallback
+        try {
+          const info = await youtubedl(youtubeUrl, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            noCallHome: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true,
+            proxy: proxyUrl,
+            noCheckCertificate: true,
+            geoBypass: true,
+            noPlaylist: true,
+            skipDownload: true
+          });
+          
+          return info;
+        } catch (err3) {
+          console.log(`[${new Date().toISOString()}] Todas as tentativas de obter informações falharam`);
+          throw err3;
+        }
+      }
     }
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);

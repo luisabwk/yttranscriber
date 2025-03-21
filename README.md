@@ -197,4 +197,22 @@ O tempo de processamento depende do tamanho do vídeo original e da capacidade d
 
 Este projeto está licenciado sob a [Licença MIT](LICENSE).
 
-##
+## ⚠️ Aviso legal
+
+Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a permissão dos detentores dos direitos pode violar leis de direitos autorais. Os usuários são responsáveis por garantir que seu uso desta API esteja em conformidade com as leis e regulamentos aplicáveis.
+
+## 🔒 Configuração do Proxy Residencial
+
+Esta versão da API está configurada para usar um proxy residencial da iProyal para contornar as restrições anti-bot do YouTube. Os proxies residenciais funcionam usando IPs de usuários reais, que são tratados com menos restrições pelo YouTube em comparação com IPs de datacenter.
+
+Se você precisar atualizar as credenciais do proxy, edite as linhas no arquivo `index.js` que contêm a URL do proxy:
+
+```javascript
+const proxyUrl = 'http://seu_usuario:sua_senha@geo.iproyal.com:12321';
+```
+
+Para obter um proxy residencial:
+1. Crie uma conta em um provedor como iProyal, Bright Data, Oxylabs, etc.
+2. Configure um proxy residencial para streaming
+3. Obtenha as credenciais e o endpoint
+4. Substitua no código conforme necessário

@@ -22,6 +22,9 @@ const EXPIRATION_TIME = 60 * 60 * 1000;
 // Armazenamento de arquivos temporários
 const tempFiles = new Map();
 
+// Adicionar um mapa para rastrear tarefas em andamento
+const pendingTasks = new Map();
+
 // Middleware para analisar JSON
 app.use(express.json());
 
@@ -349,7 +352,7 @@ async function getVideoInfo(youtubeUrl) {
   }
 }
 
-// Rota principal - recebe a URL do YouTube
+// Modificar a rota /convert para processar a solicitação em segundo plano
 app.post('/convert', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
@@ -365,126 +368,171 @@ app.post('/convert', async (req, res) => {
     
     console.log(`[${new Date().toISOString()}] Processando URL: ${youtubeUrl}`);
     
-    // Gerar ID único para o arquivo
+    // Gerar ID único para o arquivo e a tarefa
     const fileId = uuidv4();
     const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
     const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
     
-    // Obter informações do vídeo
-    let videoInfo;
-    try {
-      videoInfo = await getVideoInfo(youtubeUrl);
-      console.log(`[${new Date().toISOString()}] Título do vídeo: ${videoInfo.title}`);
-    } catch (error) {
-      console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
-      videoInfo = { title: `YouTube Video - ${fileId}` };
-    }
+    // Obter informações básicas do vídeo, mas não esperar pela conclusão completa
+    let videoTitle = `YouTube Video - ${fileId}`;
+    let taskStatus = 'pending';
     
-    const videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
-    const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
+    // Registrar a tarefa como pendente
+    pendingTasks.set(fileId, {
+      status: taskStatus,
+      title: videoTitle,
+      url: youtubeUrl,
+      created: Date.now(),
+      downloadUrl: `/download/${fileId}`
+    });
     
-    // Baixar o vídeo usando a função avançada
-    try {
-      console.log(`[${new Date().toISOString()}] Iniciando download do vídeo...`);
-      await downloadYouTubeAudio(youtubeUrl, videoPath);
-      
-      // Verificar se o arquivo MP3 já foi gerado (alguns backends de yt-dlp fazem isso automaticamente)
-      const possiblePaths = [
-        videoPath,
-        videoPath.replace('.mp4', '.mp3'),
-        videoPath.replace('.mp4', '.m4a'),
-        videoPath.replace('.mp4', '.webm')
-      ];
-      
-      let existingFile = null;
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
-          existingFile = p;
-          break;
-        }
-      }
-      
-      if (!existingFile) {
-        throw new Error('Arquivo baixado não encontrado. O download falhou.');
-      }
-      
-      console.log(`[${new Date().toISOString()}] Arquivo baixado: ${existingFile}`);
-      
-      // Se o arquivo baixado não for MP3, converter para MP3
-      if (!existingFile.endsWith('.mp3')) {
-        console.log(`[${new Date().toISOString()}] Iniciando conversão para MP3...`);
-        
-        await new Promise((resolve, reject) => {
-          ffmpeg(existingFile)
-            .outputOptions('-q:a', '0') // Melhor qualidade
-            .saveToFile(audioPath)
-            .on('progress', (progress) => {
-              console.log(`[${new Date().toISOString()}] Progresso da conversão: ${progress.percent}% concluído`);
-            })
-            .on('end', () => {
-              console.log(`[${new Date().toISOString()}] Conversão para MP3 concluída com sucesso`);
-              
-              // Remover o arquivo original após a conversão
-              try {
-                fs.unlinkSync(existingFile);
-                console.log(`[${new Date().toISOString()}] Arquivo original removido`);
-              } catch (err) {
-                console.error(`[${new Date().toISOString()}] Erro ao remover arquivo original:`, err);
-              }
-              
-              resolve();
-            })
-            .on('error', (err) => {
-              console.error(`[${new Date().toISOString()}] Erro na conversão para MP3:`, err);
-              reject(err);
-            });
-        });
-      } else {
-        // Se já for MP3, apenas renomear
-        fs.renameSync(existingFile, audioPath);
-      }
-      
-      // Gerar URL para download
-      const downloadUrl = `/download/${fileId}`;
-      
-      // Armazenar informações do arquivo
-      tempFiles.set(fileId, {
-        path: audioPath,
-        filename: `${sanitizedTitle}.mp3`,
-        expiresAt: Date.now() + EXPIRATION_TIME
-      });
-      
-      // Configurar limpeza do arquivo após o tempo de expiração
-      setTimeout(() => {
-        if (tempFiles.has(fileId)) {
-          const fileInfo = tempFiles.get(fileId);
-          if (fs.existsSync(fileInfo.path)) {
-            fs.unlinkSync(fileInfo.path);
-            console.log(`[${new Date().toISOString()}] Arquivo expirado removido: ${fileId}`);
+    // Iniciar o processo de download em segundo plano
+    (async () => {
+      try {
+        // Obter informações do vídeo
+        try {
+          const videoInfo = await getVideoInfo(youtubeUrl);
+          videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
+          const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
+          
+          // Atualizar o título da tarefa
+          if (pendingTasks.has(fileId)) {
+            const taskInfo = pendingTasks.get(fileId);
+            taskInfo.title = videoTitle;
+            pendingTasks.set(fileId, taskInfo);
           }
-          tempFiles.delete(fileId);
+        } catch (error) {
+          console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
         }
-      }, EXPIRATION_TIME);
-      
-      res.json({
-        success: true,
-        title: videoTitle,
-        downloadUrl: downloadUrl,
-        expiresIn: 'Uma hora',
-      });
-      
-    } catch (downloadError) {
-      console.error(`[${new Date().toISOString()}] Erro no download/conversão:`, downloadError);
-      res.status(500).json({ 
-        error: 'Erro ao baixar o vídeo', 
-        details: downloadError.message,
-        tips: 'O YouTube pode estar bloqueando downloads. Tente novamente mais tarde ou com outro vídeo.'
-      });
-    }
+        
+        // Baixar o vídeo
+        await downloadYouTubeAudio(youtubeUrl, videoPath);
+        
+        // Verificar se o arquivo foi baixado
+        const possiblePaths = [
+          videoPath,
+          videoPath.replace('.mp4', '.mp3'),
+          videoPath.replace('.mp4', '.m4a'),
+          videoPath.replace('.mp4', '.webm')
+        ];
+        
+        let existingFile = null;
+        for (const p of possiblePaths) {
+          if (fs.existsSync(p)) {
+            existingFile = p;
+            break;
+          }
+        }
+        
+        if (!existingFile) {
+          throw new Error('Arquivo baixado não encontrado. O download falhou.');
+        }
+        
+        // Se o arquivo baixado não for MP3, converter para MP3
+        if (!existingFile.endsWith('.mp3')) {
+          await new Promise((resolve, reject) => {
+            ffmpeg(existingFile)
+              .outputOptions('-q:a', '0')
+              .saveToFile(audioPath)
+              .on('end', () => {
+                try {
+                  fs.unlinkSync(existingFile);
+                } catch (err) {
+                  console.error(`[${new Date().toISOString()}] Erro ao remover arquivo original:`, err);
+                }
+                resolve();
+              })
+              .on('error', reject);
+          });
+        } else {
+          fs.renameSync(existingFile, audioPath);
+        }
+        
+        // Armazenar informações do arquivo no mapa de arquivos temporários
+        const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
+        tempFiles.set(fileId, {
+          path: audioPath,
+          filename: `${sanitizedTitle}.mp3`,
+          expiresAt: Date.now() + EXPIRATION_TIME
+        });
+        
+        // Configurar limpeza do arquivo
+        setTimeout(() => {
+          if (tempFiles.has(fileId)) {
+            const fileInfo = tempFiles.get(fileId);
+            if (fs.existsSync(fileInfo.path)) {
+              fs.unlinkSync(fileInfo.path);
+            }
+            tempFiles.delete(fileId);
+          }
+          // Também remover da lista de tarefas pendentes
+          if (pendingTasks.has(fileId)) {
+            pendingTasks.delete(fileId);
+          }
+        }, EXPIRATION_TIME);
+        
+        // Marcar a tarefa como concluída
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'completed';
+          pendingTasks.set(fileId, taskInfo);
+        }
+        
+        console.log(`[${new Date().toISOString()}] Processamento concluído para ${fileId}`);
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] Erro no processamento:`, error);
+        // Marcar a tarefa como falha
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'failed';
+          taskInfo.error = error.message;
+          pendingTasks.set(fileId, taskInfo);
+        }
+      }
+    })();
+    
+    // Responder imediatamente com o ID da tarefa e URL de status
+    res.json({
+      success: true,
+      message: 'Tarefa de download iniciada',
+      taskId: fileId,
+      statusUrl: `/status/${fileId}`,
+      downloadUrl: `/download/${fileId}`,
+      estimatedDuration: 'Alguns minutos, dependendo do tamanho do vídeo'
+    });
+    
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Erro no processamento:`, error);
+    console.error(`[${new Date().toISOString()}] Erro ao iniciar processo:`, error);
     res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
   }
+});
+
+// Adicionar rota para verificar o status da tarefa
+app.get('/status/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  
+  if (!pendingTasks.has(taskId)) {
+    // Verificar se já foi concluído e está disponível para download
+    if (tempFiles.has(taskId)) {
+      return res.json({
+        status: 'completed',
+        downloadUrl: `/download/${taskId}`,
+        expiresAt: new Date(tempFiles.get(taskId).expiresAt).toISOString()
+      });
+    }
+    return res.status(404).json({ error: 'Tarefa não encontrada' });
+  }
+  
+  const taskInfo = pendingTasks.get(taskId);
+  
+  res.json({
+    taskId,
+    status: taskInfo.status,
+    title: taskInfo.title,
+    created: new Date(taskInfo.created).toISOString(),
+    downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
+    error: taskInfo.error || null
+  });
 });
 
 // Rota para download do arquivo

@@ -9,11 +9,11 @@ Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em 
 ## ✨ Características
 
 - ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback
+- 🔄 Suporte a proxy residencial para contornar restrições anti-bot
 - 🎵 Conversão para MP3 em alta qualidade
 - 🔗 URLs temporárias para download
 - ⏱️ Expiração automática após 1 hora
 - 🧹 Limpeza automática de arquivos temporários
-- 🛡️ Sistema avançado de contorno de restrições anti-bot
 
 ## 📋 Pré-requisitos
 
@@ -31,31 +31,33 @@ git clone https://github.com/seu-usuario/youtube-to-mp3-api.git
 cd youtube-to-mp3-api
 ```
 
-### 2. Executar o script de instalação automatizado (Linux/Ubuntu)
-
-Este script instalará todas as dependências necessárias, incluindo FFmpeg, yt-dlp, e configurará o ambiente.
+### 2. Instale as dependências
 
 ```bash
-chmod +x setup.sh
-sudo ./setup.sh
+# Instalar dependências do Node.js
+npm install
+
+# Instalar yt-dlp (substituto moderno do youtube-dl)
+pip3 install --upgrade yt-dlp
+
+# Instalar FFmpeg (se ainda não tiver)
+# Para Ubuntu/Debian:
+sudo apt update
+sudo apt install -y ffmpeg
 ```
 
-Ou use o comando npm:
+### 3. Configure o ambiente
+
+A aplicação está configurada para usar um proxy residencial que ajuda a contornar as restrições anti-bot do YouTube.
+
+### 4. Inicie o servidor
 
 ```bash
-sudo npm run setup
-```
+# Diretamente:
+node index.js
 
-### 3. Inicie o servidor
-
-```bash
+# Ou com PM2 para manter rodando em segundo plano:
 pm2 start index.js --name yt2mp3
-```
-
-Para verificar os logs:
-
-```bash
-pm2 logs yt2mp3
 ```
 
 Por padrão, o servidor iniciará na porta 3000. Você pode alterar isso definindo a variável de ambiente `PORT`.
@@ -145,8 +147,6 @@ convertAndDownload('https://www.youtube.com/watch?v=exemplo', './musica.mp3')
 youtube-to-mp3-api/
 ├── index.js          # Arquivo principal da API
 ├── package.json      # Dependências e scripts
-├── setup.sh          # Script de instalação e configuração
-├── .ytdlp-config     # Configuração do yt-dlp (criado automaticamente)
 └── temp/             # Diretório para arquivos temporários (criado automaticamente)
 ```
 
@@ -154,10 +154,11 @@ youtube-to-mp3-api/
 
 Esta versão aprimorada da API utiliza um sistema de múltiplas abordagens para garantir o download mesmo quando o YouTube restringe acessos:
 
-1. **Abordagem 1**: Utiliza alternativas do Invidious (front-ends alternativos do YouTube)
-2. **Abordagem 2**: Tenta configurações avançadas para yt-dlp que contornam restrições
-3. **Abordagem 3**: Utiliza o YouTube Music como alternativa (às vezes tem menos restrições)
-4. **Abordagem 4**: Tenta download através do Piped.video (outro front-end alternativo)
+1. **Abordagem 1**: Utiliza proxy residencial para contornar as restrições anti-bot
+2. **Abordagem 2**: Combina proxy residencial com alternativas do Invidious (front-ends alternativos do YouTube)
+3. **Abordagem 3**: Configurações avançadas para yt-dlp que contornam restrições
+4. **Abordagem 4**: Utiliza o YouTube Music como alternativa (às vezes tem menos restrições)
+5. **Abordagem 5**: Tenta download através do Piped.video (outro front-end alternativo)
 
 Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downloads, mesmo com as restrições anti-bot do YouTube.
 
@@ -170,9 +171,9 @@ Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downlo
 ## 🔧 Solução de problemas
 
 ### Erro "Sign in to confirm you're not a bot"
-Esta versão resolve esse problema usando alternativas como Invidious e Piped, que não requerem autenticação. Se ainda encontrar esse erro:
-- Verifique se o yt-dlp está atualizado: `pip install -U yt-dlp`
-- Tente usar outro vídeo como teste, pois alguns têm restrições específicas
+Esta versão resolve esse problema usando proxy residencial. Se ainda encontrar esse erro:
+- Verifique se o serviço de proxy está ativo e funcionando
+- Tente outro proxy residencial se necessário
 
 ### Erro "FFmpeg não encontrado"
 Certifique-se de que o FFmpeg está instalado corretamente:
@@ -181,7 +182,7 @@ ffmpeg -version
 ```
 
 ### Processo de conversão lento
-O tempo de processamento depende do tamanho do vídeo original e da capacidade do servidor.
+O tempo de processamento depende do tamanho do vídeo original e da capacidade do servidor, além do roteamento através do proxy.
 
 ## 🚀 Possíveis melhorias
 
@@ -196,6 +197,4 @@ O tempo de processamento depende do tamanho do vídeo original e da capacidade d
 
 Este projeto está licenciado sob a [Licença MIT](LICENSE).
 
-## ⚠️ Aviso legal
-
-Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a permissão dos detentores dos direitos pode violar leis de direitos autorais. Os usuários são responsáveis por garantir que seu uso desta API esteja em conformidade com as leis e regulamentos aplicáveis.
+##

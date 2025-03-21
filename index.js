@@ -75,6 +75,10 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
+  // Configure o proxy com as credenciais fornecidas - DEFININDO NO ESCOPO DA FUNÇÃO INTEIRA
+  const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+  const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+  
   // Extrair ID do vídeo para uso em várias abordagens
   let videoId = '';
   if (youtubeUrl.includes('youtube.com/watch?v=')) {
@@ -91,9 +95,6 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   try {
     console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Residencial iProyal`);
     
-    // Configure o proxy com as credenciais fornecidas
-    const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
-    
     const proxyOptions = [
       '--extract-audio',
       '--audio-format', 'mp3',
@@ -103,6 +104,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
       '--no-check-certificate',
       '--geo-bypass',
       '--ignore-errors',
+      '--limit-rate', '500K', // Limitando a taxa de download para evitar detecção
+      '--user-agent', userAgent, // User agent mais comum
       '-o', outputTemplate,
       youtubeUrl
     ];
@@ -141,7 +144,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
             '--no-check-certificate',
             '--geo-bypass',
             '--ignore-errors',
-            '--proxy', proxyUrl, // Usar proxy residencial para Invidious também
+            '--proxy', proxyUrl, // Usar proxy residencial para Invidious
+            '--limit-rate', '500K',
+            '--user-agent', userAgent,
             '-o', outputTemplate,
             invidiousUrl
           ];
@@ -173,6 +178,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
           '--ignore-errors',
           '--no-playlist',
           '--proxy', proxyUrl, // Usar proxy residencial
+          '--limit-rate', '500K',
+          '--user-agent', userAgent,
           '--extractor-args', 'youtube:skip_webpage=True',
           '-o', outputTemplate,
           youtubeUrl
@@ -200,6 +207,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
             '--ignore-errors',
             '--no-playlist',
             '--proxy', proxyUrl, // Usar proxy residencial
+            '--limit-rate', '500K',
+            '--user-agent', userAgent,
             '-o', outputTemplate,
             ytMusicUrl
           ];
@@ -227,6 +236,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
               '--ignore-errors',
               '--no-playlist',
               '--proxy', proxyUrl, // Usar proxy residencial
+              '--limit-rate', '500K',
+              '--user-agent', userAgent,
               '--force-ipv4',
               '-o', outputTemplate,
               pipedUrl
@@ -264,6 +275,7 @@ async function getVideoInfo(youtubeUrl) {
     
     // Configuração do proxy residencial
     const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     
     // Primeira tentativa: usar proxy residencial
     try {
@@ -274,6 +286,7 @@ async function getVideoInfo(youtubeUrl) {
         noWarnings: true,
         noCallHome: true,
         proxy: proxyUrl,
+        userAgent: userAgent,
         noCheckCertificate: true,
         geoBypass: true,
         noPlaylist: true
@@ -293,6 +306,7 @@ async function getVideoInfo(youtubeUrl) {
           noWarnings: true,
           noCallHome: true,
           proxy: proxyUrl,
+          userAgent: userAgent,
           noCheckCertificate: true,
           geoBypass: true,
           noPlaylist: true
@@ -311,6 +325,7 @@ async function getVideoInfo(youtubeUrl) {
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
             proxy: proxyUrl,
+            userAgent: userAgent,
             noCheckCertificate: true,
             geoBypass: true,
             noPlaylist: true,

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script de configuração para YouTube to MP3 API
+# Script de configuração para YouTube to MP3 API com Proxy Residencial
 echo "==== Iniciando configuração da YouTube to MP3 API ===="
 
 # Verificar se é root
@@ -45,15 +45,29 @@ chmod 777 temp
 echo "==== Instalando dependências Node.js ===="
 npm install
 
-echo "==== Criando arquivo de configuração yt-dlp ===="
-cat > .ytdlp-config << 'EOFCONFIG'
---no-check-certificate
---geo-bypass
---ignore-errors
---no-cache-dir
---no-youtube-login
---extractor-args youtube:skip_webpage=True
-EOFCONFIG
+echo "==== Verificando conectividade com o proxy ===="
+# Teste básico para verificar se consegue se conectar ao proxy
+if command -v curl &> /dev/null; then
+    echo "Testando conexão com proxy iProyal..."
+    PROXY="http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321"
+    RESULT=$(curl -s -m 10 -x "$PROXY" https://api.ipify.org || echo "FALHA")
+    
+    if [ "$RESULT" != "FALHA" ]; then
+        echo "✅ Conexão com proxy bem-sucedida! IP público: $RESULT"
+    else
+        echo "⚠️ Não foi possível conectar ao proxy. Verifique as credenciais e conexão."
+    fi
+else
+    echo "curl não encontrado. Pulando teste de proxy."
+fi
+
+echo "==== Testando yt-dlp com proxy ===="
+if command -v yt-dlp &> /dev/null; then
+    echo "Testando yt-dlp com proxy..."
+    yt-dlp --proxy "$PROXY" --no-warnings --no-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ" || echo "⚠️ Teste de yt-dlp com proxy falhou"
+else
+    echo "yt-dlp não encontrado. Pulando teste."
+fi
 
 echo "==== Configuração completa! ===="
 echo ""

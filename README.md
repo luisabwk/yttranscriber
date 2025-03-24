@@ -72,6 +72,8 @@ Por padrão, o servidor iniciará na porta 3000. Você pode alterar isso definin
 ```json
 {
   "youtubeUrl": "https://www.youtube.com/watch?v=exemplo"
+  "transcribe": true, // Habilita a transcrição automática do vídeo
+  "language": "auto" // ou um código específico como "pt", "en", "es", etc referente ao idioma da transcrição.
 }
 ```
 

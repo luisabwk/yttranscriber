@@ -186,15 +186,6 @@ ffmpeg -version
 ### Processo de conversão lento
 O tempo de processamento depende do tamanho do vídeo original e da capacidade do servidor, além do roteamento através do proxy.
 
-## 🚀 Possíveis melhorias
-
-- [ ] Adicionar autenticação para proteger a API
-- [ ] Implementar limitação de taxa (rate limiting)
-- [ ] Adicionar suporte para diferentes formatos de áudio
-- [ ] Criar um sistema de fila para processar múltiplas solicitações
-- [ ] Implementar cache para vídeos frequentemente solicitados
-- [ ] Criar um frontend web para interface de usuário
-
 ## 📄 Licença
 
 Este projeto está licenciado sob a [Licença MIT](LICENSE).

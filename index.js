@@ -1,4 +1,6 @@
 // youtube-to-mp3-api/index.js
+require('dotenv').config(); // Carregar variáveis do arquivo .env
+
 const express = require('express');
 const youtubedl = require('youtube-dl-exec');
 const ffmpeg = require('fluent-ffmpeg');
@@ -6,9 +8,22 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Configuração do proxy residencial a partir das variáveis de ambiente
+const IPROYAL_USERNAME = process.env.IPROYAL_USERNAME;
+const IPROYAL_PASSWORD = process.env.IPROYAL_PASSWORD;
+
+// Verificar se as credenciais do proxy foram fornecidas
+if (!IPROYAL_USERNAME || !IPROYAL_PASSWORD) {
+  console.error("AVISO: Credenciais do proxy IPRoyal não configuradas no arquivo .env");
+  console.error("As funcionalidades que dependem do proxy podem não funcionar corretamente.");
+}
+
+const proxyUrl = `http://${IPROYAL_USERNAME}:${IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
 
 // Pasta para armazenar os arquivos temporários
 const TEMP_DIR = path.join(__dirname, 'temp');
@@ -24,6 +39,19 @@ const tempFiles = new Map();
 
 // Adicionar um mapa para rastrear tarefas em andamento
 const pendingTasks = new Map();
+
+// Configuração da API Assembly AI
+const ASSEMBLY_API_KEY = process.env.ASSEMBLY_API_KEY;
+const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION === 'true';
+
+// Verificar se a chave API do AssemblyAI foi fornecida
+if (ENABLE_TRANSCRIPTION && (!ASSEMBLY_API_KEY || ASSEMBLY_API_KEY === '')) {
+  console.error("AVISO: Transcrição ativada, mas a chave API do AssemblyAI não foi configurada no arquivo .env");
+  console.error("A funcionalidade de transcrição não funcionará corretamente.");
+}
+
+// Armazenar as transcrições
+const transcriptions = new Map();
 
 // Middleware para analisar JSON
 app.use(express.json());
@@ -78,8 +106,7 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  // Configure o proxy com as credenciais fornecidas - DEFININDO NO ESCOPO DA FUNÇÃO INTEIRA
-  const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+  // User agent comum para evitar detecção
   const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
   
   // Extrair ID do vídeo para uso em várias abordagens
@@ -276,8 +303,7 @@ async function getVideoInfo(youtubeUrl) {
       throw new Error('Não foi possível extrair o ID do vídeo');
     }
     
-    // Configuração do proxy residencial
-    const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+    // User agent comum para evitar detecção
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     
     // Primeira tentativa: usar proxy residencial
@@ -352,10 +378,145 @@ async function getVideoInfo(youtubeUrl) {
   }
 }
 
+// Função para transcrever áudio usando Assembly AI
+async function transcribeAudio(audioFilePath, fileId, language = 'auto') {
+  try {
+    console.log(`[${new Date().toISOString()}] Iniciando transcrição para ${fileId} no idioma: ${language}`);
+    
+    if (!ENABLE_TRANSCRIPTION || !ASSEMBLY_API_KEY) {
+      console.log(`[${new Date().toISOString()}] Transcrição desativada ou chave da API não configurada`);
+      return {
+        success: false,
+        message: 'Transcrição desativada ou chave da API não configurada'
+      };
+    }
+
+    // Atualizar o status da tarefa
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'uploading';
+      pendingTasks.set(fileId, taskInfo);
+    }
+
+    // Ler o arquivo de áudio
+    const audioFile = fs.readFileSync(audioFilePath);
+    const audioSize = fs.statSync(audioFilePath).size;
+    console.log(`[${new Date().toISOString()}] Tamanho do arquivo de áudio: ${audioSize} bytes`);
+
+    // Upload do áudio para Assembly AI
+    const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': ASSEMBLY_API_KEY
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+
+    const audioUrl = uploadResponse.data.upload_url;
+    console.log(`[${new Date().toISOString()}] Áudio enviado com sucesso para Assembly AI: ${audioUrl}`);
+
+    // Atualizar status
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'processing';
+      pendingTasks.set(fileId, taskInfo);
+    }
+
+    // Preparar os parâmetros para a transcrição
+    const transcriptParams = {
+      audio_url: audioUrl
+    };
+    
+    // Definir o idioma se não for 'auto'
+    if (language !== 'auto') {
+      transcriptParams.language_code = language;
+    }
+
+    // Iniciar a transcrição
+    const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', 
+      transcriptParams, 
+      {
+        headers: {
+          'Authorization': ASSEMBLY_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const transcriptId = transcriptResponse.data.id;
+    console.log(`[${new Date().toISOString()}] Transcrição iniciada com ID: ${transcriptId}`);
+
+    // Verificar o status da transcrição até que esteja completa
+    let transcriptResult;
+    let isCompleted = false;
+    
+    while (!isCompleted) {
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar 3 segundos entre verificações
+      
+      const checkResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+        headers: {
+          'Authorization': ASSEMBLY_API_KEY
+        }
+      });
+      
+      const status = checkResponse.data.status;
+      console.log(`[${new Date().toISOString()}] Status da transcrição: ${status}`);
+      
+      if (status === 'completed') {
+        isCompleted = true;
+        transcriptResult = checkResponse.data;
+      } else if (status === 'error') {
+        throw new Error(`Erro na transcrição: ${checkResponse.data.error}`);
+      }
+    }
+
+    // Salvar a transcrição
+    transcriptions.set(fileId, {
+      text: transcriptResult.text,
+      raw: transcriptResult,
+      language: language,
+      created: Date.now(),
+      expiresAt: Date.now() + EXPIRATION_TIME
+    });
+
+    // Atualizar o status da tarefa
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'completed';
+      taskInfo.hasTranscription = true;
+      taskInfo.transcriptionUrl = `/transcription/${fileId}`;
+      pendingTasks.set(fileId, taskInfo);
+    }
+
+    console.log(`[${new Date().toISOString()}] Transcrição concluída com sucesso para ${fileId}`);
+    return {
+      success: true,
+      transcription: transcriptResult.text,
+      language: language
+    };
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro na transcrição:`, error.message);
+    
+    // Atualizar o status da tarefa
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'failed';
+      taskInfo.transcriptionError = error.message;
+      pendingTasks.set(fileId, taskInfo);
+    }
+    
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
 // Modificar a rota /convert para processar a solicitação em segundo plano
 app.post('/convert', async (req, res) => {
   try {
-    const { youtubeUrl } = req.body;
+    const { youtubeUrl, transcribe, language } = req.body;
     
     if (!youtubeUrl) {
       return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
@@ -373,6 +534,12 @@ app.post('/convert', async (req, res) => {
     const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
     const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
     
+    // Verificar se a transcrição foi solicitada
+    const shouldTranscribe = (transcribe === true || transcribe === 'true') && ENABLE_TRANSCRIPTION;
+    
+    // Idioma para transcrição (padrão: auto = detecção automática)
+    const transcriptionLanguage = language || 'auto';
+    
     // Obter informações básicas do vídeo, mas não esperar pela conclusão completa
     let videoTitle = `YouTube Video - ${fileId}`;
     let taskStatus = 'pending';
@@ -383,7 +550,11 @@ app.post('/convert', async (req, res) => {
       title: videoTitle,
       url: youtubeUrl,
       created: Date.now(),
-      downloadUrl: `/download/${fileId}`
+      downloadUrl: `/download/${fileId}`,
+      transcriptionRequested: shouldTranscribe,
+      transcriptionStatus: shouldTranscribe ? 'pending' : null,
+      transcriptionLanguage: transcriptionLanguage,
+      hasTranscription: false
     });
     
     // Iniciar o processo de download em segundo plano
@@ -456,6 +627,26 @@ app.post('/convert', async (req, res) => {
           expiresAt: Date.now() + EXPIRATION_TIME
         });
         
+        // Marcar a tarefa de download como concluída
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'completed';
+          pendingTasks.set(fileId, taskInfo);
+        }
+        
+        // Iniciar transcrição se solicitado
+        if (shouldTranscribe) {
+          console.log(`[${new Date().toISOString()}] Iniciando processo de transcrição para ${fileId} no idioma: ${transcriptionLanguage}`);
+          
+          // Não aguardar a conclusão da transcrição, executar em segundo plano
+          transcribeAudio(audioPath, fileId, transcriptionLanguage).then(transcriptResult => {
+            console.log(`[${new Date().toISOString()}] Resultado da transcrição:`, 
+                        transcriptResult.success ? 'Sucesso' : 'Falha');
+          }).catch(err => {
+            console.error(`[${new Date().toISOString()}] Erro ao iniciar transcrição:`, err);
+          });
+        }
+        
         // Configurar limpeza do arquivo
         setTimeout(() => {
           if (tempFiles.has(fileId)) {
@@ -469,14 +660,11 @@ app.post('/convert', async (req, res) => {
           if (pendingTasks.has(fileId)) {
             pendingTasks.delete(fileId);
           }
+          // Remover transcrição
+          if (transcriptions.has(fileId)) {
+            transcriptions.delete(fileId);
+          }
         }, EXPIRATION_TIME);
-        
-        // Marcar a tarefa como concluída
-        if (pendingTasks.has(fileId)) {
-          const taskInfo = pendingTasks.get(fileId);
-          taskInfo.status = 'completed';
-          pendingTasks.set(fileId, taskInfo);
-        }
         
         console.log(`[${new Date().toISOString()}] Processamento concluído para ${fileId}`);
       } catch (error) {
@@ -492,14 +680,25 @@ app.post('/convert', async (req, res) => {
     })();
     
     // Responder imediatamente com o ID da tarefa e URL de status
-    res.json({
+    const response = {
       success: true,
       message: 'Tarefa de download iniciada',
       taskId: fileId,
       statusUrl: `/status/${fileId}`,
       downloadUrl: `/download/${fileId}`,
       estimatedDuration: 'Alguns minutos, dependendo do tamanho do vídeo'
-    });
+    };
+    
+    // Adicionar informações de transcrição se solicitada
+    if (shouldTranscribe) {
+      response.transcriptionRequested = true;
+      response.transcriptionStatus = 'pending';
+      response.transcriptionUrl = `/transcription/${fileId}`;
+      response.transcriptionLanguage = transcriptionLanguage;
+      response.message += '. Transcrição será processada automaticamente após o download.';
+    }
+    
+    res.json(response);
     
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Erro ao iniciar processo:`, error);
@@ -510,29 +709,71 @@ app.post('/convert', async (req, res) => {
 // Adicionar rota para verificar o status da tarefa
 app.get('/status/:taskId', (req, res) => {
   const { taskId } = req.params;
+  const includeTranscription = req.query.includeTranscription === 'true';
   
   if (!pendingTasks.has(taskId)) {
     // Verificar se já foi concluído e está disponível para download
     if (tempFiles.has(taskId)) {
-      return res.json({
+      const response = {
         status: 'completed',
         downloadUrl: `/download/${taskId}`,
         expiresAt: new Date(tempFiles.get(taskId).expiresAt).toISOString()
-      });
+      };
+      
+      // Adicionar informações de transcrição, se disponível
+      if (transcriptions.has(taskId)) {
+        response.hasTranscription = true;
+        response.transcriptionUrl = `/transcription/${taskId}`;
+        response.transcriptionLanguage = transcriptions.get(taskId).language;
+        
+        // Incluir a transcrição na resposta se solicitado
+        if (includeTranscription) {
+          const transcriptionInfo = transcriptions.get(taskId);
+          response.transcription = transcriptionInfo.text;
+          response.transcriptionCompletedAt = new Date(transcriptionInfo.created).toISOString();
+        }
+      }
+      
+      return res.json(response);
     }
     return res.status(404).json({ error: 'Tarefa não encontrada' });
   }
   
   const taskInfo = pendingTasks.get(taskId);
   
-  res.json({
+  // Preparar a resposta básica
+  const response = {
     taskId,
     status: taskInfo.status,
     title: taskInfo.title,
     created: new Date(taskInfo.created).toISOString(),
     downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
     error: taskInfo.error || null
-  });
+  };
+  
+  // Adicionar informações de transcrição, se solicitada
+  if (taskInfo.transcriptionRequested) {
+    response.transcriptionRequested = true;
+    response.transcriptionStatus = taskInfo.transcriptionStatus;
+    response.transcriptionLanguage = taskInfo.transcriptionLanguage;
+    
+    if (taskInfo.hasTranscription) {
+      response.transcriptionUrl = taskInfo.transcriptionUrl;
+      
+      // Incluir a transcrição completa se solicitado e disponível
+      if (includeTranscription && transcriptions.has(taskId)) {
+        const transcriptionInfo = transcriptions.get(taskId);
+        response.transcription = transcriptionInfo.text;
+        response.transcriptionCompletedAt = new Date(transcriptionInfo.created).toISOString();
+      }
+    }
+    
+    if (taskInfo.transcriptionError) {
+      response.transcriptionError = taskInfo.transcriptionError;
+    }
+  }
+  
+  res.json(response);
 });
 
 // Rota para download do arquivo
@@ -565,12 +806,59 @@ app.get('/download/:fileId', (req, res) => {
   fileStream.pipe(res);
 });
 
+// Adicionar rota para obter a transcrição
+app.get('/transcription/:fileId', (req, res) => {
+  const { fileId } = req.params;
+  const format = req.query.format || 'text'; // Alterado o padrão para 'text'
+  
+  if (!transcriptions.has(fileId)) {
+    // Verificar se a transcrição ainda está sendo processada
+    if (pendingTasks.has(fileId) && 
+        pendingTasks.get(fileId).transcriptionRequested && 
+        pendingTasks.get(fileId).transcriptionStatus !== 'failed') {
+      return res.status(202).json({ 
+        message: 'Transcrição ainda está sendo processada',
+        status: pendingTasks.get(fileId).transcriptionStatus,
+        language: pendingTasks.get(fileId).transcriptionLanguage
+      });
+    }
+    
+    return res.status(404).json({ error: 'Transcrição não encontrada ou expirada' });
+  }
+  
+  const transcriptionInfo = transcriptions.get(fileId);
+  
+  // Verificar se a transcrição expirou
+  if (Date.now() > transcriptionInfo.expiresAt) {
+    transcriptions.delete(fileId);
+    return res.status(404).json({ error: 'Transcrição expirada' });
+  }
+  
+  // Retornar a transcrição no formato solicitado
+  if (format === 'json') {
+    return res.json({
+      text: transcriptionInfo.text,
+      language: transcriptionInfo.language,
+      created: new Date(transcriptionInfo.created).toISOString(),
+      raw: transcriptionInfo.raw
+    });
+  } else {
+    // Formato padrão: texto simples
+    res.setHeader('Content-Type', 'text/plain');
+    return res.send(transcriptionInfo.text);
+  }
+});
+
 // Rota de status
 app.get('/status', (req, res) => {
   res.json({ 
     status: 'online',
     version: '1.1.0',
-    message: 'API funcionando normalmente'
+    message: 'API funcionando normalmente',
+    features: {
+      transcription: ENABLE_TRANSCRIPTION,
+      proxyAvailable: !!(IPROYAL_USERNAME && IPROYAL_PASSWORD)
+    }
   });
 });
 
@@ -583,7 +871,9 @@ app.listen(PORT, () => {
 setInterval(() => {
   const now = Date.now();
   let countRemoved = 0;
+  let countTranscriptionsRemoved = 0;
   
+  // Limpar arquivos de áudio
   for (const [fileId, fileInfo] of tempFiles.entries()) {
     if (now > fileInfo.expiresAt) {
       if (fs.existsSync(fileInfo.path)) {
@@ -591,10 +881,23 @@ setInterval(() => {
         countRemoved++;
       }
       tempFiles.delete(fileId);
+      
+      // Também remover da lista de tarefas pendentes
+      if (pendingTasks.has(fileId)) {
+        pendingTasks.delete(fileId);
+      }
     }
   }
   
-  if (countRemoved > 0) {
-    console.log(`[${new Date().toISOString()}] Limpeza automática: ${countRemoved} arquivo(s) expirado(s) removido(s)`);
+  // Limpar transcrições expiradas
+  for (const [fileId, transcriptionInfo] of transcriptions.entries()) {
+    if (now > transcriptionInfo.expiresAt) {
+      transcriptions.delete(fileId);
+      countTranscriptionsRemoved++;
+    }
+  }
+  
+  if (countRemoved > 0 || countTranscriptionsRemoved > 0) {
+    console.log(`[${new Date().toISOString()}] Limpeza automática: ${countRemoved} arquivo(s) expirado(s) e ${countTranscriptionsRemoved} transcrição(ões) removido(s)`);
   }
 }, 15 * 60 * 1000); // Verificar a cada 15 minutos

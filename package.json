@@ -1,7 +1,7 @@
 {
   "name": "youtube-to-mp3-api",
   "version": "1.1.0",
-  "description": "API para baixar vídeos do YouTube e converter para MP3",
+  "description": "API para baixar vídeos do YouTube e converter para MP3 com transcrição",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -12,7 +12,8 @@
     "youtube",
     "mp3",
     "converter",
-    "api"
+    "api",
+    "transcription"
   ],
   "author": "",
   "license": "MIT",
@@ -20,7 +21,9 @@
     "express": "^4.18.2",
     "youtube-dl-exec": "^2.4.15",
     "fluent-ffmpeg": "^2.1.2",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

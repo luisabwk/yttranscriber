@@ -12,6 +12,7 @@ Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em 
 - 🔄 Suporte a proxy residencial para contornar restrições anti-bot
 - 🎵 Conversão para MP3 em alta qualidade
 - 🔗 URLs temporárias para download
+- ⚡ Processamento assíncrono com acompanhamento de status
 - ⏱️ Expiração automática após 1 hora
 - 🧹 Limpeza automática de arquivos temporários
 
@@ -48,7 +49,7 @@ sudo apt install -y ffmpeg
 
 ### 3. Configure o ambiente
 
-A aplicação está configurada para usar um proxy residencial que ajuda a contornar as restrições anti-bot do YouTube.
+A aplicação está configurada para usar um proxy residencial que ajuda a contornar as restrições anti-bot do YouTube. O proxy padrão está configurado no código, mas você pode modificá-lo se necessário.
 
 ### 4. Inicie o servidor
 
@@ -79,11 +80,34 @@ Por padrão, o servidor iniciará na porta 3000. Você pode alterar isso definin
 ```json
 {
   "success": true,
-  "title": "Título do Vídeo",
+  "message": "Tarefa de download iniciada",
+  "taskId": "123e4567-e89b-12d3-a456-426614174000",
+  "statusUrl": "/status/123e4567-e89b-12d3-a456-426614174000",
   "downloadUrl": "/download/123e4567-e89b-12d3-a456-426614174000",
-  "expiresIn": "Uma hora"
+  "estimatedDuration": "Alguns minutos, dependendo do tamanho do vídeo"
 }
 ```
+
+### Verificar o status da tarefa
+
+**Endpoint:** `GET /status/:taskId`
+
+**Resposta de sucesso:**
+```json
+{
+  "taskId": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "completed",
+  "title": "Título do Vídeo",
+  "created": "2023-03-21T12:34:56.789Z",
+  "downloadUrl": "/download/123e4567-e89b-12d3-a456-426614174000",
+  "error": null
+}
+```
+
+Possíveis valores para `status`:
+- `pending`: A tarefa está na fila para ser processada
+- `completed`: O download e a conversão foram concluídos com sucesso
+- `failed`: Ocorreu um erro durante o processamento
 
 ### Baixar o arquivo MP3
 
@@ -119,10 +143,31 @@ async function convertAndDownload(youtubeUrl, outputPath) {
     youtubeUrl: youtubeUrl
   });
   
-  // Etapa 2: Baixar o arquivo
+  const taskId = conversion.data.taskId;
+  console.log(`Tarefa iniciada: ${taskId}`);
+  
+  // Etapa 2: Verificar o status periodicamente
+  let completed = false;
+  
+  while (!completed) {
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Esperar 5 segundos
+    
+    const statusResponse = await axios.get(`${API_URL}/status/${taskId}`);
+    const status = statusResponse.data;
+    
+    console.log(`Status: ${status.status}`);
+    
+    if (status.status === 'completed') {
+      completed = true;
+    } else if (status.status === 'failed') {
+      throw new Error(`Falha no processamento: ${status.error}`);
+    }
+  }
+  
+  // Etapa 3: Baixar o arquivo
   const response = await axios({
     method: 'GET',
-    url: `${API_URL}${conversion.data.downloadUrl}`,
+    url: `${API_URL}/download/${taskId}`,
     responseType: 'stream'
   });
   
@@ -162,6 +207,17 @@ Esta versão aprimorada da API utiliza um sistema de múltiplas abordagens para 
 
 Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downloads, mesmo com as restrições anti-bot do YouTube.
 
+## 🔀 Processamento Assíncrono
+
+A API implementa um sistema de processamento assíncrono para melhorar a experiência do usuário e permitir o download de vídeos maiores:
+
+1. Quando uma solicitação é recebida, a API inicia o processamento em segundo plano
+2. Uma resposta imediata é enviada com o ID da tarefa e URLs para verificar o status e baixar o arquivo quando estiver pronto
+3. O cliente pode verificar periodicamente o status da tarefa usando o endpoint `/status/:taskId`
+4. Quando o processamento for concluído, o arquivo estará disponível para download por até uma hora
+
+Isso evita timeouts em conexões HTTP e proporciona uma experiência mais robusta para o usuário.
+
 ## 📝 Notas importantes
 
 - Os arquivos são automaticamente excluídos após uma hora para economizar espaço em disco.
@@ -184,6 +240,12 @@ ffmpeg -version
 ### Processo de conversão lento
 O tempo de processamento depende do tamanho do vídeo original e da capacidade do servidor, além do roteamento através do proxy.
 
+### Tarefa presa no status "pending"
+Se a tarefa ficar presa no status "pending" por muito tempo:
+- Verifique os logs do servidor para possíveis erros
+- Reinicie o servidor se necessário
+- Certifique-se de que o sistema tem recursos suficientes (CPU/RAM) para processar o vídeo
+
 ## 🚀 Possíveis melhorias
 
 - [ ] Adicionar autenticação para proteger a API
@@ -191,6 +253,7 @@ O tempo de processamento depende do tamanho do vídeo original e da capacidade d
 - [ ] Adicionar suporte para diferentes formatos de áudio
 - [ ] Criar um sistema de fila para processar múltiplas solicitações
 - [ ] Implementar cache para vídeos frequentemente solicitados
+- [ ] Adicionar suporte para transcrição de áudio para texto
 - [ ] Criar um frontend web para interface de usuário
 
 ## 📄 Licença

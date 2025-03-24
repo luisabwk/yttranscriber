@@ -38,6 +38,96 @@ const transcriptions = new Map();
 // Middleware para analisar JSON
 app.use(express.json());
 
+// Middleware para CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
+
+// Rota para download do arquivo
+app.get('/download/:fileId', (req, res) => {
+  const { fileId } = req.params;
+  
+  if (!tempFiles.has(fileId)) {
+    return res.status(404).json({ error: 'Arquivo não encontrado ou expirado' });
+  }
+  
+  const fileInfo = tempFiles.get(fileId);
+  
+  // Verificar se o arquivo ainda existe
+  if (!fs.existsSync(fileInfo.path)) {
+    tempFiles.delete(fileId);
+    return res.status(404).json({ error: 'Arquivo não encontrado' });
+  }
+  
+  // Verificar se o arquivo expirou
+  if (Date.now() > fileInfo.expiresAt) {
+    fs.unlinkSync(fileInfo.path);
+    tempFiles.delete(fileId);
+    return res.status(404).json({ error: 'Arquivo expirado' });
+  }
+  
+  res.setHeader('Content-Disposition', `attachment; filename="${fileInfo.filename}"`);
+  res.setHeader('Content-Type', 'audio/mpeg');
+  
+  const fileStream = fs.createReadStream(fileInfo.path);
+  fileStream.pipe(res);
+});
+
+// Rota de status
+app.get('/status', (req, res) => {
+  res.json({ 
+    status: 'online',
+    version: '1.1.0',
+    message: 'API funcionando normalmente'
+  });
+});
+
+// Iniciar o servidor
+app.listen(PORT, () => {
+  console.log(`[${new Date().toISOString()}] Servidor rodando na porta ${PORT}`);
+});
+
+// Limpar arquivos temporários periodicamente
+setInterval(() => {
+  const now = Date.now();
+  let countRemoved = 0;
+  let transcriptionsRemoved = 0;
+  
+  // Limpar arquivos de áudio
+  for (const [fileId, fileInfo] of tempFiles.entries()) {
+    if (now > fileInfo.expiresAt) {
+      if (fs.existsSync(fileInfo.path)) {
+        fs.unlinkSync(fileInfo.path);
+        countRemoved++;
+      }
+      tempFiles.delete(fileId);
+      
+      // Remover tarefas relacionadas
+      if (pendingTasks.has(fileId)) {
+        pendingTasks.delete(fileId);
+      }
+    }
+  }
+  
+  // Limpar transcrições expiradas
+  for (const [fileId, transcription] of transcriptions.entries()) {
+    if (now > transcription.expiresAt) {
+      transcriptions.delete(fileId);
+      transcriptionsRemoved++;
+    }
+  }
+  
+  if (countRemoved > 0 || transcriptionsRemoved > 0) {
+    console.log(`[${new Date().toISOString()}] Limpeza automática: ${countRemoved} arquivo(s) e ${transcriptionsRemoved} transcrição(ões) expirado(s) removido(s)`);
+  }
+}, 15 * 60 * 1000); // Verificar a cada 15 minutos
+
+// Exportar app para testes
+module.exports = app;
+
 // Função para validar URL do YouTube
 function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
@@ -133,7 +223,89 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
     try {
       console.log(`[${new Date().toISOString()}] Tentando abordagem 2: Proxy Invidious`);
       
-      // Lista de instâncias Invidious para tentar
+      // Verificar se tem transcrição e se foi solicitada inclusão
+      if (includeTranscription && transcriptions.has(taskId)) {
+        response.transcription = {
+          text: transcriptions.get(taskId).text,
+          language: transcriptions.get(taskId).language,
+          completedAt: new Date(transcriptions.get(taskId).created).toISOString()
+        };
+      }
+      
+      return res.json(response);
+});
+
+// Rota para obter a transcrição
+app.get('/transcription/:fileId', (req, res) => {
+  const { fileId } = req.params;
+  const format = req.query.format || 'text'; // Formato padrão: texto simples
+  
+  if (!transcriptions.has(fileId)) {
+    return res.status(404).json({ error: 'Transcrição não encontrada ou expirada' });
+  }
+  
+  const transcription = transcriptions.get(fileId);
+  
+  // Verificar se a transcrição expirou
+  if (Date.now() > transcription.expiresAt) {
+    transcriptions.delete(fileId);
+    return res.status(404).json({ error: 'Transcrição expirada' });
+  }
+  
+  // Retornar no formato solicitado
+  switch (format.toLowerCase()) {
+    case 'json':
+      return res.json({
+        text: transcription.text,
+        language: transcription.language,
+        created: new Date(transcription.created).toISOString(),
+        expiresAt: new Date(transcription.expiresAt).toISOString()
+      });
+    case 'text':
+    default:
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.send(transcription.text);
+  }
+});
+    }
+    return res.status(404).json({ error: 'Tarefa não encontrada' });
+  }
+  
+  const taskInfo = pendingTasks.get(taskId);
+  const response = {
+    taskId,
+    status: taskInfo.status,
+    title: taskInfo.title,
+    created: new Date(taskInfo.created).toISOString(),
+    downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
+    error: taskInfo.error || null
+  };
+  
+  // Adicionar informações de transcrição se solicitado
+  if (taskInfo.transcriptionRequested) {
+    response.transcriptionRequested = true;
+    response.transcriptionStatus = taskInfo.transcriptionStatus;
+    response.detectedLanguage = taskInfo.detectedLanguage || null;
+    
+    if (taskInfo.hasTranscription && includeTranscription && transcriptions.has(taskId)) {
+      response.transcription = {
+        text: transcriptions.get(taskId).text,
+        language: transcriptions.get(taskId).language,
+        completedAt: new Date(transcriptions.get(taskId).created).toISOString()
+      };
+    }
+    
+    if (taskInfo.transcriptionStatus === 'completed') {
+      response.transcriptionUrl = taskInfo.transcriptionUrl;
+    }
+    
+    if (taskInfo.transcriptionError) {
+      response.transcriptionError = taskInfo.transcriptionError;
+    }
+  }
+  
+  res.json(response);
+}); Lista de instâncias Invidious para tentar
       const invidiousInstances = [
         'yewtu.be',
         'invidious.snopyta.org',
@@ -498,77 +670,7 @@ app.post('/convert', async (req, res) => {
     const { youtubeUrl, transcribe } = req.body;
     
     if (!youtubeUrl) {
-      return res.status(404).json({ error: 'Tarefa não encontrada' });
-  }
-  
-  const taskInfo = pendingTasks.get(taskId);
-  const response = {
-    taskId,
-    status: taskInfo.status,
-    title: taskInfo.title,
-    created: new Date(taskInfo.created).toISOString(),
-    downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
-    error: taskInfo.error || null
-  };
-  
-  // Adicionar informações de transcrição se solicitado
-  if (taskInfo.transcriptionRequested) {
-    response.transcriptionRequested = true;
-    response.transcriptionStatus = taskInfo.transcriptionStatus;
-    response.detectedLanguage = taskInfo.detectedLanguage || null;
-    
-    if (taskInfo.hasTranscription && includeTranscription && transcriptions.has(taskId)) {
-      response.transcription = {
-        text: transcriptions.get(taskId).text,
-        language: transcriptions.get(taskId).language,
-        completedAt: new Date(transcriptions.get(taskId).created).toISOString()
-      };
-    }
-    
-    if (taskInfo.transcriptionStatus === 'completed') {
-      response.transcriptionUrl = taskInfo.transcriptionUrl;
-    }
-    
-    if (taskInfo.transcriptionError) {
-      response.transcriptionError = taskInfo.transcriptionError;
-    }
-  }
-  
-  res.json(response);
-});
-
-// Rota para obter a transcrição
-app.get('/transcription/:fileId', (req, res) => {
-  const { fileId } = req.params;
-  const format = req.query.format || 'text'; // Formato padrão: texto simples
-  
-  if (!transcriptions.has(fileId)) {
-    return res.status(404).json({ error: 'Transcrição não encontrada ou expirada' });
-  }
-  
-  const transcription = transcriptions.get(fileId);
-  
-  // Verificar se a transcrição expirou
-  if (Date.now() > transcription.expiresAt) {
-    transcriptions.delete(fileId);
-    return res.status(404).json({ error: 'Transcrição expirada' });
-  }
-  
-  // Retornar no formato solicitado
-  switch (format.toLowerCase()) {
-    case 'json':
-      return res.json({
-        text: transcription.text,
-        language: transcription.language,
-        created: new Date(transcription.created).toISOString(),
-        expiresAt: new Date(transcription.expiresAt).toISOString()
-      });
-    case 'text':
-    default:
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      return res.send(transcription.text);
-  }
-});status(400).json({ error: 'URL do YouTube é obrigatória' });
+      return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
     }
     
     // Validar a URL do YouTube
@@ -764,15 +866,4 @@ app.get('/status/:taskId', (req, res) => {
         expiresAt: new Date(tempFiles.get(taskId).expiresAt).toISOString()
       };
       
-      // Verificar se tem transcrição e se foi solicitada inclusão
-      if (includeTranscription && transcriptions.has(taskId)) {
-        response.transcription = {
-          text: transcriptions.get(taskId).text,
-          language: transcriptions.get(taskId).language,
-          completedAt: new Date(transcriptions.get(taskId).created).toISOString()
-        };
-      }
-      
-      return res.json(response);
-    }
-    return res.
+      //

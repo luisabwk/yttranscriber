@@ -88,8 +88,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  // Configure o proxy com as credenciais fornecidas - DEFININDO NO ESCOPO DA FUNÇÃO INTEIRA
-  const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+  // Configure o proxy com as credenciais fornecidas do arquivo .env
+  const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
   const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
   
   // Extrair ID do vídeo para uso em várias abordagens
@@ -286,8 +286,8 @@ async function getVideoInfo(youtubeUrl) {
       throw new Error('Não foi possível extrair o ID do vídeo');
     }
     
-    // Configuração do proxy residencial
-    const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+    // Configuração do proxy residencial do arquivo .env
+    const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     
     // Primeira tentativa: usar proxy residencial

@@ -1,4 +1,6 @@
 // youtube-to-mp3-api/index.js
+require('dotenv').config(); // Carregar variáveis do arquivo .env
+
 const express = require('express');
 const youtubedl = require('youtube-dl-exec');
 const ffmpeg = require('fluent-ffmpeg');
@@ -6,9 +8,14 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
+const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Configuração do proxy residencial (de preferência de um arquivo .env)
+const PROXY_URL = process.env.PROXY_URL || 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
 
 // Pasta para armazenar os arquivos temporários
 const TEMP_DIR = path.join(__dirname, 'temp');
@@ -25,8 +32,13 @@ const tempFiles = new Map();
 // Adicionar um mapa para rastrear tarefas em andamento
 const pendingTasks = new Map();
 
-// Middleware para analisar JSON
+// Middleware para analisar JSON e permitir CORS
 app.use(express.json());
+app.use(cors());
+
+// Middleware para limitar o tamanho das requisições
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Função para validar URL do YouTube
 function validateYouTubeUrl(url) {
@@ -78,10 +90,6 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  // Configure o proxy com as credenciais fornecidas - DEFININDO NO ESCOPO DA FUNÇÃO INTEIRA
-  const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
-  const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
-  
   // Extrair ID do vídeo para uso em várias abordagens
   let videoId = '';
   if (youtubeUrl.includes('youtube.com/watch?v=')) {
@@ -103,12 +111,12 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
       '--audio-format', 'mp3',
       '--audio-quality', '0',
       '--no-warnings',
-      '--proxy', proxyUrl,
+      '--proxy', PROXY_URL,
       '--no-check-certificate',
       '--geo-bypass',
       '--ignore-errors',
       '--limit-rate', '500K', // Limitando a taxa de download para evitar detecção
-      '--user-agent', userAgent, // User agent mais comum
+      '--user-agent', USER_AGENT, // User agent mais comum
       '-o', outputTemplate,
       youtubeUrl
     ];
@@ -147,9 +155,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
             '--no-check-certificate',
             '--geo-bypass',
             '--ignore-errors',
-            '--proxy', proxyUrl, // Usar proxy residencial para Invidious
+            '--proxy', PROXY_URL, // Usar proxy residencial para Invidious
             '--limit-rate', '500K',
-            '--user-agent', userAgent,
+            '--user-agent', USER_AGENT,
             '-o', outputTemplate,
             invidiousUrl
           ];
@@ -180,9 +188,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
           '--geo-bypass',
           '--ignore-errors',
           '--no-playlist',
-          '--proxy', proxyUrl, // Usar proxy residencial
+          '--proxy', PROXY_URL, // Usar proxy residencial
           '--limit-rate', '500K',
-          '--user-agent', userAgent,
+          '--user-agent', USER_AGENT,
           '--extractor-args', 'youtube:skip_webpage=True',
           '-o', outputTemplate,
           youtubeUrl
@@ -209,9 +217,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
             '--geo-bypass',
             '--ignore-errors',
             '--no-playlist',
-            '--proxy', proxyUrl, // Usar proxy residencial
+            '--proxy', PROXY_URL, // Usar proxy residencial
             '--limit-rate', '500K',
-            '--user-agent', userAgent,
+            '--user-agent', USER_AGENT,
             '-o', outputTemplate,
             ytMusicUrl
           ];
@@ -238,9 +246,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
               '--geo-bypass',
               '--ignore-errors',
               '--no-playlist',
-              '--proxy', proxyUrl, // Usar proxy residencial
+              '--proxy', PROXY_URL, // Usar proxy residencial
               '--limit-rate', '500K',
-              '--user-agent', userAgent,
+              '--user-agent', USER_AGENT,
               '--force-ipv4',
               '-o', outputTemplate,
               pipedUrl
@@ -276,10 +284,6 @@ async function getVideoInfo(youtubeUrl) {
       throw new Error('Não foi possível extrair o ID do vídeo');
     }
     
-    // Configuração do proxy residencial
-    const proxyUrl = 'http://d4Xzafgb5TJfSLpI:YQhSnyw789HDtj4u_streaming-1@geo.iproyal.com:12321';
-    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
-    
     // Primeira tentativa: usar proxy residencial
     try {
       console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial`);
@@ -288,8 +292,8 @@ async function getVideoInfo(youtubeUrl) {
         dumpSingleJson: true,
         noWarnings: true,
         noCallHome: true,
-        proxy: proxyUrl,
-        userAgent: userAgent,
+        proxy: PROXY_URL,
+        userAgent: USER_AGENT,
         noCheckCertificate: true,
         geoBypass: true,
         noPlaylist: true
@@ -308,8 +312,8 @@ async function getVideoInfo(youtubeUrl) {
           dumpSingleJson: true,
           noWarnings: true,
           noCallHome: true,
-          proxy: proxyUrl,
-          userAgent: userAgent,
+          proxy: PROXY_URL,
+          userAgent: USER_AGENT,
           noCheckCertificate: true,
           geoBypass: true,
           noPlaylist: true
@@ -327,8 +331,8 @@ async function getVideoInfo(youtubeUrl) {
             noCallHome: true,
             preferFreeFormats: true,
             youtubeSkipDashManifest: true,
-            proxy: proxyUrl,
-            userAgent: userAgent,
+            proxy: PROXY_URL,
+            userAgent: USER_AGENT,
             noCheckCertificate: true,
             geoBypass: true,
             noPlaylist: true,
@@ -355,7 +359,7 @@ async function getVideoInfo(youtubeUrl) {
 // Modificar a rota /convert para processar a solicitação em segundo plano
 app.post('/convert', async (req, res) => {
   try {
-    const { youtubeUrl } = req.body;
+    const { youtubeUrl, format = 'mp3' } = req.body;
     
     if (!youtubeUrl) {
       return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
@@ -366,12 +370,21 @@ app.post('/convert', async (req, res) => {
       return res.status(400).json({ error: 'URL do YouTube inválida' });
     }
     
+    // Validar formato (atualmente só suporta mp3, mas preparado para expansão futura)
+    const supportedFormats = ['mp3'];
+    if (!supportedFormats.includes(format)) {
+      return res.status(400).json({ 
+        error: 'Formato não suportado', 
+        message: `Os formatos suportados são: ${supportedFormats.join(', ')}` 
+      });
+    }
+    
     console.log(`[${new Date().toISOString()}] Processando URL: ${youtubeUrl}`);
     
     // Gerar ID único para o arquivo e a tarefa
     const fileId = uuidv4();
     const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
-    const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
+    const audioPath = path.join(TEMP_DIR, `${fileId}.${format}`);
     
     // Obter informações básicas do vídeo, mas não esperar pela conclusão completa
     let videoTitle = `YouTube Video - ${fileId}`;
@@ -383,12 +396,21 @@ app.post('/convert', async (req, res) => {
       title: videoTitle,
       url: youtubeUrl,
       created: Date.now(),
-      downloadUrl: `/download/${fileId}`
+      format: format,
+      downloadUrl: `/download/${fileId}`,
+      progress: 0
     });
     
     // Iniciar o processo de download em segundo plano
     (async () => {
       try {
+        // Atualizar o status da tarefa para processando
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'processing';
+          pendingTasks.set(fileId, taskInfo);
+        }
+        
         // Obter informações do vídeo
         try {
           const videoInfo = await getVideoInfo(youtubeUrl);
@@ -399,6 +421,7 @@ app.post('/convert', async (req, res) => {
           if (pendingTasks.has(fileId)) {
             const taskInfo = pendingTasks.get(fileId);
             taskInfo.title = videoTitle;
+            taskInfo.progress = 10; // 10% após obter informações
             pendingTasks.set(fileId, taskInfo);
           }
         } catch (error) {
@@ -406,7 +429,20 @@ app.post('/convert', async (req, res) => {
         }
         
         // Baixar o vídeo
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'downloading';
+          taskInfo.progress = 20; // 20% ao iniciar o download
+          pendingTasks.set(fileId, taskInfo);
+        }
+        
         await downloadYouTubeAudio(youtubeUrl, videoPath);
+        
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.progress = 60; // 60% após o download
+          pendingTasks.set(fileId, taskInfo);
+        }
         
         // Verificar se o arquivo foi baixado
         const possiblePaths = [
@@ -428,15 +464,34 @@ app.post('/convert', async (req, res) => {
           throw new Error('Arquivo baixado não encontrado. O download falhou.');
         }
         
-        // Se o arquivo baixado não for MP3, converter para MP3
-        if (!existingFile.endsWith('.mp3')) {
+        // Se o arquivo baixado não for no formato solicitado, converter
+        if (!existingFile.endsWith(`.${format}`)) {
+          if (pendingTasks.has(fileId)) {
+            const taskInfo = pendingTasks.get(fileId);
+            taskInfo.status = 'converting';
+            taskInfo.progress = 70; // 70% ao iniciar a conversão
+            pendingTasks.set(fileId, taskInfo);
+          }
+          
           await new Promise((resolve, reject) => {
             ffmpeg(existingFile)
-              .outputOptions('-q:a', '0')
+              .outputOptions('-q:a', '0') // Melhor qualidade
+              .on('progress', (progress) => {
+                // Atualizar o progresso da conversão
+                if (pendingTasks.has(fileId)) {
+                  const taskInfo = pendingTasks.get(fileId);
+                  // Progresso vai de 70% a 90%
+                  if (progress.percent) {
+                    taskInfo.progress = 70 + Math.min(20, (progress.percent / 100) * 20);
+                    pendingTasks.set(fileId, taskInfo);
+                  }
+                }
+              })
               .saveToFile(audioPath)
               .on('end', () => {
                 try {
                   fs.unlinkSync(existingFile);
+                  console.log(`[${new Date().toISOString()}] Arquivo original removido`);
                 } catch (err) {
                   console.error(`[${new Date().toISOString()}] Erro ao remover arquivo original:`, err);
                 }
@@ -448,11 +503,18 @@ app.post('/convert', async (req, res) => {
           fs.renameSync(existingFile, audioPath);
         }
         
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.progress = 90; // 90% após a conversão
+          pendingTasks.set(fileId, taskInfo);
+        }
+        
         // Armazenar informações do arquivo no mapa de arquivos temporários
         const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
         tempFiles.set(fileId, {
           path: audioPath,
-          filename: `${sanitizedTitle}.mp3`,
+          filename: `${sanitizedTitle}.${format}`,
+          format: format,
           expiresAt: Date.now() + EXPIRATION_TIME
         });
         
@@ -462,6 +524,7 @@ app.post('/convert', async (req, res) => {
             const fileInfo = tempFiles.get(fileId);
             if (fs.existsSync(fileInfo.path)) {
               fs.unlinkSync(fileInfo.path);
+              console.log(`[${new Date().toISOString()}] Arquivo expirado removido: ${fileId}`);
             }
             tempFiles.delete(fileId);
           }
@@ -475,6 +538,7 @@ app.post('/convert', async (req, res) => {
         if (pendingTasks.has(fileId)) {
           const taskInfo = pendingTasks.get(fileId);
           taskInfo.status = 'completed';
+          taskInfo.progress = 100; // 100% concluído
           pendingTasks.set(fileId, taskInfo);
         }
         
@@ -515,9 +579,12 @@ app.get('/status/:taskId', (req, res) => {
     // Verificar se já foi concluído e está disponível para download
     if (tempFiles.has(taskId)) {
       return res.json({
+        taskId,
         status: 'completed',
         downloadUrl: `/download/${taskId}`,
-        expiresAt: new Date(tempFiles.get(taskId).expiresAt).toISOString()
+        format: tempFiles.get(taskId).format || 'mp3',
+        expiresAt: new Date(tempFiles.get(taskId).expiresAt).toISOString(),
+        progress: 100
       });
     }
     return res.status(404).json({ error: 'Tarefa não encontrada' });
@@ -530,6 +597,8 @@ app.get('/status/:taskId', (req, res) => {
     status: taskInfo.status,
     title: taskInfo.title,
     created: new Date(taskInfo.created).toISOString(),
+    progress: taskInfo.progress || 0,
+    format: taskInfo.format || 'mp3',
     downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
     error: taskInfo.error || null
   });
@@ -558,20 +627,73 @@ app.get('/download/:fileId', (req, res) => {
     return res.status(404).json({ error: 'Arquivo expirado' });
   }
   
+  // Determinar o tipo MIME correto com base no formato
+  let contentType = 'audio/mpeg'; // Padrão para MP3
+  if (fileInfo.format === 'mp3') {
+    contentType = 'audio/mpeg';
+  }
+  
   res.setHeader('Content-Disposition', `attachment; filename="${fileInfo.filename}"`);
-  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Type', contentType);
   
   const fileStream = fs.createReadStream(fileInfo.path);
   fileStream.pipe(res);
+});
+
+// Rota para listar todas as tarefas ativas (útil para administração)
+app.get('/tasks', (req, res) => {
+  const tasks = [];
+  
+  // Adicionar tarefas pendentes
+  pendingTasks.forEach((taskInfo, taskId) => {
+    tasks.push({
+      taskId,
+      status: taskInfo.status,
+      title: taskInfo.title,
+      created: new Date(taskInfo.created).toISOString(),
+      progress: taskInfo.progress || 0
+    });
+  });
+  
+  // Adicionar tarefas concluídas com arquivos disponíveis
+  tempFiles.forEach((fileInfo, fileId) => {
+    // Verificar se já não está na lista de tarefas pendentes
+    if (!pendingTasks.has(fileId)) {
+      tasks.push({
+        taskId: fileId,
+        status: 'completed',
+        title: fileInfo.filename.replace(`.${fileInfo.format || 'mp3'}`, ''),
+        expiresAt: new Date(fileInfo.expiresAt).toISOString(),
+        progress: 100
+      });
+    }
+  });
+  
+  res.json({ tasks });
 });
 
 // Rota de status
 app.get('/status', (req, res) => {
   res.json({ 
     status: 'online',
-    version: '1.1.0',
-    message: 'API funcionando normalmente'
+    version: '1.2.0',
+    message: 'API funcionando normalmente',
+    stats: {
+      pendingTasks: pendingTasks.size,
+      availableFiles: tempFiles.size
+    }
   });
+});
+
+// Middleware para lidar com rotas não encontradas
+app.use((req, res) => {
+  res.status(404).json({ error: 'Rota não encontrada' });
+});
+
+// Middleware para lidar com erros
+app.use((error, req, res, next) => {
+  console.error(`[${new Date().toISOString()}] Erro não tratado:`, error);
+  res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
 });
 
 // Iniciar o servidor
@@ -598,3 +720,32 @@ setInterval(() => {
     console.log(`[${new Date().toISOString()}] Limpeza automática: ${countRemoved} arquivo(s) expirado(s) removido(s)`);
   }
 }, 15 * 60 * 1000); // Verificar a cada 15 minutos
+
+// Verificar tarefas pendentes que podem ter travado
+setInterval(() => {
+  const now = Date.now();
+  let countStatusUpdated = 0;
+  
+  for (const [taskId, taskInfo] of pendingTasks.entries()) {
+    // Se a tarefa está em processamento há mais de 30 minutos, provavelmente travou
+    const taskAge = now - taskInfo.created;
+    const MAX_PROCESSING_TIME = 30 * 60 * 1000; // 30 minutos
+    
+    if ((taskInfo.status === 'pending' || taskInfo.status === 'processing') && 
+        taskAge > MAX_PROCESSING_TIME) {
+      
+      console.log(`[${new Date().toISOString()}] Detectada tarefa possivelmente travada: ${taskId}`);
+      
+      // Marcar como falha
+      taskInfo.status = 'failed';
+      taskInfo.error = 'Tempo limite excedido. A tarefa pode ter travado.';
+      pendingTasks.set(taskId, taskInfo);
+      
+      countStatusUpdated++;
+    }
+  }
+  
+  if (countStatusUpdated > 0) {
+    console.log(`[${new Date().toISOString()}] Limpeza de tarefas: ${countStatusUpdated} tarefa(s) travada(s) marcada(s) como falha`);
+  }
+}, 10 * 60 * 1000); // Verificar a cada 10 minutos

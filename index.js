@@ -94,7 +94,7 @@ async function transcribeAudio(audioFilePath, fileId) {
 
     // Formatar a transcrição em markdown
     const transcriptionText = transcriptResult.text;
-    const detectedLanguage = transcriptResult.language_code || 'Automático';
+    const detectedLanguage = transcriptResult.language_code || 'auto';
     const transcriptionMarkdown = `# Transcrição do áudio (Idioma: ${detectedLanguage})\n\n${transcriptionText}`;
     
     // Salvar a transcrição

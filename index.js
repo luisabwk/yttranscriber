@@ -13,6 +13,11 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Função para validar URL do YouTube
+function validateYouTubeUrl(url) {
+  return url.includes('youtube.com/') || url.includes('youtu.be/');
+}
+
 // Pasta para armazenar os arquivos temporários
 const TEMP_DIR = path.join(__dirname, 'temp');
 if (!fs.existsSync(TEMP_DIR)) {
@@ -22,7 +27,7 @@ if (!fs.existsSync(TEMP_DIR)) {
 // Tempo de expiração (em milissegundos) - 1 hora
 const EXPIRATION_TIME = 60 * 60 * 1000;
 
-// Armazenamento de arquivos temporários e transcrições
+// Armazenamento de arquivos temporários, tarefas pendentes e transcrições
 const tempFiles = new Map();
 const pendingTasks = new Map();
 const transcriptions = new Map();
@@ -36,7 +41,7 @@ const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION === 'true' || fals
 // ----------------------------------------------------------------
 const conversionQueue = [];
 let activeJobs = 0;
-const MAX_CONCURRENT_JOBS = 1; // Em droplet com 1 vCPU, limite para 1 job simultâneo
+const MAX_CONCURRENT_JOBS = 1; // Para droplet com 1 vCPU
 
 function enqueueJob(job) {
   conversionQueue.push(job);
@@ -173,7 +178,389 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
-// Rota para iniciar a conversão
+// ----------------------------------------------------------------
+// Funções Auxiliares
+// ----------------------------------------------------------------
+
+// Função para executar comandos do yt-dlp
+function executeYtDlp(args) {
+  return new Promise((resolve, reject) => {
+    console.log(`[${new Date().toISOString()}] Executando yt-dlp com argumentos:`, args.join(' '));
+    const ytDlp = spawn('yt-dlp', args);
+    let stdout = '';
+    let stderr = '';
+    ytDlp.stdout.on('data', (data) => {
+      const output = data.toString();
+      stdout += output;
+      console.log(`[${new Date().toISOString()}] yt-dlp stdout: ${output.trim()}`);
+    });
+    ytDlp.stderr.on('data', (data) => {
+      const output = data.toString();
+      stderr += output;
+      console.log(`[${new Date().toISOString()}] yt-dlp stderr: ${output.trim()}`);
+    });
+    ytDlp.on('close', (code) => {
+      if (code !== 0) {
+        console.log(`[${new Date().toISOString()}] ERRO: yt-dlp falhou com código ${code}`);
+        console.log(`[${new Date().toISOString()}] Detalhes: ${stderr}`);
+        reject(new Error(stderr || `yt-dlp exit code: ${code}`));
+        return;
+      }
+      resolve(stdout);
+    });
+    ytDlp.on('error', (err) => {
+      console.log(`[${new Date().toISOString()}] Erro ao executar yt-dlp: ${err.message}`);
+      reject(err);
+    });
+  });
+}
+
+// Função avançada para baixar áudio do YouTube com múltiplas abordagens
+async function downloadYouTubeAudio(youtubeUrl, outputPath) {
+  const outputTemplate = outputPath.replace(/\.\w+$/, '') + '.%(ext)s';
+  console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
+  console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
+  
+  const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
+  const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+  
+  let videoId = '';
+  if (youtubeUrl.includes('youtube.com/watch?v=')) {
+    videoId = new URL(youtubeUrl).searchParams.get('v');
+  } else if (youtubeUrl.includes('youtu.be/')) {
+    videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
+  }
+  if (!videoId) {
+    throw new Error('Não foi possível extrair o ID do vídeo');
+  }
+  
+  // Abordagem 1: Proxy Residencial iProyal
+  try {
+    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Residencial iProyal`);
+    const proxyOptions = [
+      '--extract-audio',
+      '--audio-format', 'mp3',
+      '--audio-quality', '0',
+      '--no-warnings',
+      '--proxy', proxyUrl,
+      '--no-check-certificate',
+      '--geo-bypass',
+      '--ignore-errors',
+      '--limit-rate', '500K',
+      '--user-agent', userAgent,
+      '-o', outputTemplate,
+      youtubeUrl
+    ];
+    await executeYtDlp(proxyOptions);
+    console.log(`[${new Date().toISOString()}] Abordagem com proxy residencial bem-sucedida!`);
+    return { success: true };
+  } catch (errorProxy) {
+    console.log(`[${new Date().toISOString()}] Abordagem com proxy residencial falhou: ${errorProxy.message}`);
+    // Abordagem 2: Instâncias Invidious
+    try {
+      console.log(`[${new Date().toISOString()}] Tentando abordagem 2: Proxy Invidious`);
+      const invidiousInstances = [
+        'yewtu.be',
+        'invidious.snopyta.org',
+        'vid.puffyan.us',
+        'invidious.kavin.rocks',
+        'invidious.namazso.eu',
+        'inv.riverside.rocks'
+      ];
+      for (const instance of invidiousInstances) {
+        try {
+          const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
+          console.log(`[${new Date().toISOString()}] Usando URL do Invidious: ${invidiousUrl}`);
+          const invidiousOptions = [
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--no-warnings',
+            '--no-check-certificate',
+            '--geo-bypass',
+            '--ignore-errors',
+            '--proxy', proxyUrl,
+            '--limit-rate', '500K',
+            '--user-agent', userAgent,
+            '-o', outputTemplate,
+            invidiousUrl
+          ];
+          await executeYtDlp(invidiousOptions);
+          console.log(`[${new Date().toISOString()}] Download com ${instance} bem-sucedido!`);
+          return { success: true };
+        } catch (err) {
+          console.log(`[${new Date().toISOString()}] Falha com ${instance}: ${err.message}`);
+        }
+      }
+      throw new Error('Todas as instâncias Invidious falharam');
+    } catch (error2) {
+      console.log(`[${new Date().toISOString()}] Abordagem 2 (Invidious) falhou: ${error2.message}`);
+      // Abordagem 3: Configurações avançadas
+      try {
+        console.log(`[${new Date().toISOString()}] Tentando abordagem 3: Configurações avançadas`);
+        const advancedOptions = [
+          '--extract-audio',
+          '--audio-format', 'mp3',
+          '--audio-quality', '0',
+          '--no-warnings',
+          '--format', 'bestaudio[ext=m4a]/bestaudio/best',
+          '--no-check-certificate',
+          '--geo-bypass',
+          '--ignore-errors',
+          '--no-playlist',
+          '--proxy', proxyUrl,
+          '--limit-rate', '500K',
+          '--user-agent', userAgent,
+          '--extractor-args', 'youtube:skip_webpage=True',
+          '-o', outputTemplate,
+          youtubeUrl
+        ];
+        await executeYtDlp(advancedOptions);
+        console.log(`[${new Date().toISOString()}] Abordagem 3 bem-sucedida!`);
+        return { success: true };
+      } catch (error3) {
+        console.log(`[${new Date().toISOString()}] Abordagem 3 falhou: ${error3.message}`);
+        // Abordagem 4: YouTube Music
+        try {
+          console.log(`[${new Date().toISOString()}] Tentando abordagem 4: YouTube Music`);
+          const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
+          console.log(`[${new Date().toISOString()}] Usando URL do YouTube Music: ${ytMusicUrl}`);
+          const ytMusicOptions = [
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--no-warnings',
+            '--no-check-certificate',
+            '--geo-bypass',
+            '--ignore-errors',
+            '--no-playlist',
+            '--proxy', proxyUrl,
+            '--limit-rate', '500K',
+            '--user-agent', userAgent,
+            '-o', outputTemplate,
+            ytMusicUrl
+          ];
+          await executeYtDlp(ytMusicOptions);
+          console.log(`[${new Date().toISOString()}] Abordagem 4 bem-sucedida!`);
+          return { success: true };
+        } catch (error4) {
+          console.log(`[${new Date().toISOString()}] Abordagem 4 falhou: ${error4.message}`);
+          // Abordagem 5: Piped.video
+          try {
+            console.log(`[${new Date().toISOString()}] Tentando abordagem 5: Piped.video`);
+            const pipedUrl = `https://piped.video/watch?v=${videoId}`;
+            console.log(`[${new Date().toISOString()}] Usando URL do Piped: ${pipedUrl}`);
+            const pipedOptions = [
+              '--extract-audio',
+              '--audio-format', 'mp3',
+              '--audio-quality', '0',
+              '--no-warnings',
+              '--no-check-certificate',
+              '--geo-bypass',
+              '--ignore-errors',
+              '--no-playlist',
+              '--proxy', proxyUrl,
+              '--limit-rate', '500K',
+              '--user-agent', userAgent,
+              '--force-ipv4',
+              '-o', outputTemplate,
+              pipedUrl
+            ];
+            await executeYtDlp(pipedOptions);
+            console.log(`[${new Date().toISOString()}] Abordagem 5 bem-sucedida!`);
+            return { success: true };
+          } catch (error5) {
+            console.log(`[${new Date().toISOString()}] Abordagem 5 falhou: ${error5.message}`);
+            throw new Error('Todas as abordagens de download falharam. O YouTube está bloqueando acessos automatizados.');
+          }
+        }
+      }
+    }
+  }
+}
+
+// Função para obter informações do vídeo
+async function getVideoInfo(youtubeUrl) {
+  try {
+    console.log(`[${new Date().toISOString()}] Buscando informações do vídeo: ${youtubeUrl}`);
+    let videoId = '';
+    if (youtubeUrl.includes('youtube.com/watch?v=')) {
+      videoId = new URL(youtubeUrl).searchParams.get('v');
+    } else if (youtubeUrl.includes('youtu.be/')) {
+      videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
+    }
+    if (!videoId) {
+      throw new Error('Não foi possível extrair o ID do vídeo');
+    }
+    const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+    try {
+      console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial`);
+      const info = await youtubedl(youtubeUrl, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        noCallHome: true,
+        proxy: proxyUrl,
+        userAgent: userAgent,
+        noCheckCertificate: true,
+        geoBypass: true,
+        noPlaylist: true
+      });
+      return info;
+    } catch (err) {
+      console.log(`[${new Date().toISOString()}] Falha ao obter informações via proxy residencial: ${err.message}`);
+      try {
+        console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
+        const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
+        const info = await youtubedl(invidiousUrl, {
+          dumpSingleJson: true,
+          noWarnings: true,
+          noCallHome: true,
+          proxy: proxyUrl,
+          userAgent: userAgent,
+          noCheckCertificate: true,
+          geoBypass: true,
+          noPlaylist: true
+        });
+        return info;
+      } catch (err2) {
+        console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err2.message}`);
+        try {
+          const info = await youtubedl(youtubeUrl, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            noCallHome: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true,
+            proxy: proxyUrl,
+            userAgent: userAgent,
+            noCheckCertificate: true,
+            geoBypass: true,
+            noPlaylist: true,
+            skipDownload: true
+          });
+          return info;
+        } catch (err3) {
+          console.log(`[${new Date().toISOString()}] Todas as tentativas de obter informações falharam`);
+          throw err3;
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
+    return { title: `YouTube Video - ${videoId || 'Unknown'}` };
+  }
+}
+
+// Função para transcrever áudio usando Assembly AI
+async function transcribeAudio(audioFilePath, fileId) {
+  try {
+    console.log(`[${new Date().toISOString()}] Iniciando transcrição para ${fileId}`);
+    if (!ENABLE_TRANSCRIPTION || !ASSEMBLY_API_KEY || ASSEMBLY_API_KEY === 'SUA_CHAVE_DA_API_AQUI') {
+      console.log(`[${new Date().toISOString()}] Transcrição desativada ou chave da API não configurada`);
+      return {
+        success: false,
+        message: 'Transcrição desativada ou chave da API não configurada'
+      };
+    }
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'uploading';
+      pendingTasks.set(fileId, taskInfo);
+    }
+    const audioFile = fs.readFileSync(audioFilePath);
+    const audioSize = fs.statSync(audioFilePath).size;
+    console.log(`[${new Date().toISOString()}] Tamanho do arquivo de áudio: ${audioSize} bytes`);
+    const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': ASSEMBLY_API_KEY
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+    const audioUrl = uploadResponse.data.upload_url;
+    console.log(`[${new Date().toISOString()}] Áudio enviado com sucesso para Assembly AI: ${audioUrl}`);
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'processing';
+      pendingTasks.set(fileId, taskInfo);
+    }
+    const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
+      audio_url: audioUrl,
+      language_detection: true
+    }, {
+      headers: {
+        'Authorization': ASSEMBLY_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+    const transcriptId = transcriptResponse.data.id;
+    console.log(`[${new Date().toISOString()}] Transcrição iniciada com ID: ${transcriptId}`);
+    let transcriptResult;
+    let isCompleted = false;
+    while (!isCompleted) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const checkResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+        headers: {
+          'Authorization': ASSEMBLY_API_KEY
+        }
+      });
+      const status = checkResponse.data.status;
+      console.log(`[${new Date().toISOString()}] Status da transcrição: ${status}`);
+      if (status === 'completed') {
+        isCompleted = true;
+        transcriptResult = checkResponse.data;
+      } else if (status === 'error') {
+        throw new Error(`Erro na transcrição: ${checkResponse.data.error}`);
+      }
+    }
+    const transcriptionText = transcriptResult.text;
+    const detectedLanguage = transcriptResult.language_code || 'Não detectado';
+    const taskInfo = pendingTasks.get(fileId) || {};
+    const videoTitle = taskInfo.title || `YouTube Video - ${fileId}`;
+    const channel = taskInfo.channel || 'Unknown';
+    transcriptions.set(fileId, {
+      text: transcriptionText,
+      raw: transcriptResult,
+      language: detectedLanguage,
+      created: Date.now(),
+      expiresAt: Date.now() + EXPIRATION_TIME,
+      videoTitle,
+      channel
+    });
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'completed';
+      taskInfo.hasTranscription = true;
+      taskInfo.transcriptionUrl = `/transcription/${fileId}`;
+      taskInfo.detectedLanguage = detectedLanguage;
+      pendingTasks.set(fileId, taskInfo);
+    }
+    console.log(`[${new Date().toISOString()}] Transcrição concluída com sucesso para ${fileId} no idioma ${detectedLanguage}`);
+    return {
+      success: true,
+      transcription: transcriptionText,
+      language: detectedLanguage
+    };
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro na transcrição:`, error.message);
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'failed';
+      taskInfo.transcriptionError = error.message;
+      pendingTasks.set(fileId, taskInfo);
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// ----------------------------------------------------------------
+// Rota /convert para processar a solicitação usando a fila
+// ----------------------------------------------------------------
 app.post('/convert', async (req, res) => {
   try {
     const { youtubeUrl, transcribe } = req.body;
@@ -201,7 +588,6 @@ app.post('/convert', async (req, res) => {
       transcriptionStatus: shouldTranscribe ? 'pending' : null,
       hasTranscription: false
     });
-    // Obter informações do vídeo e atualizar título e canal
     try {
       const videoInfo = await getVideoInfo(youtubeUrl);
       videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
@@ -215,10 +601,8 @@ app.post('/convert', async (req, res) => {
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
     }
-    // Enfileira a tarefa de conversão
     enqueueJob(async () => {
       try {
-        // Baixar vídeo e extrair áudio
         await downloadYouTubeAudio(youtubeUrl, videoPath);
         const possiblePaths = [
           videoPath,
@@ -273,7 +657,6 @@ app.post('/convert', async (req, res) => {
             console.error(`[${new Date().toISOString()}] Erro ao iniciar transcrição:`, err);
           });
         }
-        // Configurar limpeza após expiração
         setTimeout(() => {
           if (tempFiles.has(fileId)) {
             const fileInfo = tempFiles.get(fileId);
@@ -300,7 +683,6 @@ app.post('/convert', async (req, res) => {
         }
       }
     });
-    // Responde imediatamente
     const response = {
       success: true,
       message: 'Tarefa de download iniciada',

@@ -179,39 +179,50 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
-// Novo Endpoint /stats para buscar estatísticas do vídeo, com scraping adicional para inscritos
+// Novo Endpoint /stats para buscar estatísticas do vídeo, com scraping para inscritos
 app.post('/stats', async (req, res) => {
   try {
+    console.log(`[${new Date().toISOString()}] /stats - Requisição recebida para ${req.body.youtubeUrl}`);
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) {
+      console.log(`[${new Date().toISOString()}] /stats - URL do YouTube não fornecida`);
       return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
     }
     if (!validateYouTubeUrl(youtubeUrl)) {
+      console.log(`[${new Date().toISOString()}] /stats - URL inválida: ${youtubeUrl}`);
       return res.status(400).json({ error: 'URL do YouTube inválida' });
     }
+    
     // Obter metadados do vídeo
     const info = await getVideoInfo(youtubeUrl);
-    
+    console.log(`[${new Date().toISOString()}] /stats - Metadados obtidos:`, info);
+
     // Formatar a data de publicação (assumindo formato YYYYMMDD)
     let uploadDate = 'Unknown';
     if (info.upload_date && info.upload_date.length === 8) {
       uploadDate = `${info.upload_date.slice(0, 4)}-${info.upload_date.slice(4, 6)}-${info.upload_date.slice(6)}`;
+      console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Tentar obter o número de inscritos via yt-dlp ou scraping
+    // Obter número de inscritos via yt-dlp ou scraping adicional
     let subscriberCount = info.channel_subscribers || 0;
+    console.log(`[${new Date().toISOString()}] /stats - channel_subscribers inicial: ${subscriberCount}`);
     if (!subscriberCount && info.uploader_url) {
       try {
+        console.log(`[${new Date().toISOString()}] /stats - Fazendo scraping na URL do canal: ${info.uploader_url}`);
         const channelResponse = await axios.get(info.uploader_url);
         const $ = cheerio.load(channelResponse.data);
         const subText = $('#owner-sub-count').text();
-        // Extraímos apenas os dígitos do texto "123 inscritos"
+        console.log(`[${new Date().toISOString()}] /stats - Texto obtido de #owner-sub-count: "${subText}"`);
         const match = subText.match(/(\d[\d,.]*)/);
         if (match) {
           subscriberCount = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
+          console.log(`[${new Date().toISOString()}] /stats - Subscriber count extraído via scraping: ${subscriberCount}`);
+        } else {
+          console.log(`[${new Date().toISOString()}] /stats - Nenhum número encontrado no texto.`);
         }
       } catch (err) {
-        console.error(`[${new Date().toISOString()}] Erro ao obter inscritos via scraping:`, err);
+        console.error(`[${new Date().toISOString()}] /stats - Erro ao obter inscritos via scraping:`, err);
       }
     }
     
@@ -225,9 +236,10 @@ app.post('/stats', async (req, res) => {
       subscriberCount: subscriberCount,
       uploadDate: uploadDate
     };
+    console.log(`[${new Date().toISOString()}] /stats - Dados finais:`, stats);
     return res.json(stats);
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Erro ao buscar estatísticas:`, error);
+    console.error(`[${new Date().toISOString()}] /stats - Erro ao buscar estatísticas:`, error);
     return res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
   }
 });

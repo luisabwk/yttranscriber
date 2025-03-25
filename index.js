@@ -9,7 +9,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const axios = require('axios');
-const puppeteer = require('puppeteer'); // Para carregar o DOM renderizado
+const puppeteer = require('puppeteer'); // Para obter dados renderizados via Puppeteer
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,18 +19,18 @@ function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
 }
 
-// Função para usar Puppeteer e extrair o número de inscritos do elemento "#owner-sub-count" na página do vídeo
-async function fetchSubscriberCountWithPuppeteer(videoUrl) {
+// Função para buscar o número de inscritos usando Puppeteer a partir da página do vídeo
+async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
   let browser;
   try {
     console.log(`[${new Date().toISOString()}] Puppeteer - Iniciando navegador para ${videoUrl}`);
     browser = await puppeteer.launch({ args: ['--no-sandbox'] });
     const page = await browser.newPage();
     await page.goto(videoUrl, { waitUntil: 'networkidle2' });
-    // Aguarda o elemento ficar disponível (timeout de 10 segundos)
-    await page.waitForSelector('#owner-sub-count', { timeout: 10000 });
+    // Aguarda que o seletor esteja presente (timeout de 15 segundos)
+    await page.waitForSelector('#owner-sub-count', { timeout: 15000 });
     const subText = await page.$eval('#owner-sub-count', el => el.textContent);
-    console.log(`[${new Date().toISOString()}] Puppeteer - Texto obtido: "${subText}"`);
+    console.log(`[${new Date().toISOString()}] Puppeteer - Texto obtido de #owner-sub-count: "${subText}"`);
     const match = subText.match(/(\d[\d,.]*)/);
     if (match) {
       const count = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
@@ -206,7 +206,9 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
-// Novo Endpoint /stats para buscar estatísticas do vídeo usando informações do yt-dlp
+// Novo Endpoint /stats para buscar estatísticas do vídeo
+// Aqui usamos os metadados do yt-dlp para a maioria dos dados e, para o número de inscritos,
+// usamos o Puppeteer para extrair o conteúdo do seletor "#owner-sub-count" na página do vídeo.
 app.post('/stats', async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] /stats - Requisição recebida para ${req.body.youtubeUrl}`);
@@ -231,9 +233,9 @@ app.post('/stats', async (req, res) => {
       console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Usar os metadados retornados pelo yt-dlp para inscritos
-    let subscriberCount = info.channel_subscribers || 0;
-    console.log(`[${new Date().toISOString()}] /stats - Subscriber count (via yt-dlp): ${subscriberCount}`);
+    // Obter o número de inscritos usando Puppeteer
+    const subscriberCount = await fetchChannelSubscribersWithPuppeteer(youtubeUrl);
+    console.log(`[${new Date().toISOString()}] /stats - Subscriber count (via Puppeteer): ${subscriberCount}`);
     
     const stats = {
       videoTitle: info.title || 'Unknown',

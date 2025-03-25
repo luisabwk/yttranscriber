@@ -178,6 +178,32 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
+// Rota para buscar estatísticas do vídeo
+app.post('/stats', async (req, res) => {
+  try {
+    const { youtubeUrl } = req.body;
+    if (!youtubeUrl) {
+      return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
+    }
+    if (!validateYouTubeUrl(youtubeUrl)) {
+      return res.status(400).json({ error: 'URL do YouTube inválida' });
+    }
+    // Utiliza a função getVideoInfo para obter os metadados do vídeo
+    const info = await getVideoInfo(youtubeUrl);
+    const stats = {
+      videoTitle: info.title || 'Unknown',
+      views: info.view_count || 0,
+      likes: info.like_count || 0,
+      dislikes: info.dislike_count || 0,
+      commentCount: info.comment_count || 0
+    };
+    return res.json(stats);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro ao buscar estatísticas:`, error);
+    return res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
+  }
+});
+
 // ----------------------------------------------------------------
 // Funções Auxiliares
 // ----------------------------------------------------------------

@@ -1,4 +1,4 @@
-# YouTube to MP3 API
+# YouTube Transcriber API
 
 Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em formato MP3 e disponibilizar através de URLs temporárias.
 

@@ -9,6 +9,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const axios = require('axios');
+const puppeteer = require('puppeteer'); // Para carregar o DOM renderizado
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,33 @@ const PORT = process.env.PORT || 3000;
 // Função para validar URL do YouTube
 function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
+}
+
+// Função para usar Puppeteer e extrair o número de inscritos do elemento "#owner-sub-count" na página do vídeo
+async function fetchSubscriberCountWithPuppeteer(videoUrl) {
+  let browser;
+  try {
+    console.log(`[${new Date().toISOString()}] Puppeteer - Iniciando navegador para ${videoUrl}`);
+    browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+    const page = await browser.newPage();
+    await page.goto(videoUrl, { waitUntil: 'networkidle2' });
+    // Aguarda o elemento ficar disponível (timeout de 10 segundos)
+    await page.waitForSelector('#owner-sub-count', { timeout: 10000 });
+    const subText = await page.$eval('#owner-sub-count', el => el.textContent);
+    console.log(`[${new Date().toISOString()}] Puppeteer - Texto obtido: "${subText}"`);
+    const match = subText.match(/(\d[\d,.]*)/);
+    if (match) {
+      const count = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
+      console.log(`[${new Date().toISOString()}] Puppeteer - Número de inscritos extraído: ${count}`);
+      return count;
+    }
+    return 0;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Puppeteer - Erro ao extrair inscritos: ${error.message}`);
+    return 0;
+  } finally {
+    if (browser) await browser.close();
+  }
 }
 
 // Pasta para armazenar os arquivos temporários
@@ -203,7 +231,7 @@ app.post('/stats', async (req, res) => {
       console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Usar o que o yt-dlp fornece para inscritos
+    // Usar os metadados retornados pelo yt-dlp para inscritos
     let subscriberCount = info.channel_subscribers || 0;
     console.log(`[${new Date().toISOString()}] /stats - Subscriber count (via yt-dlp): ${subscriberCount}`);
     

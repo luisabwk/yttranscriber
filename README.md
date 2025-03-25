@@ -1,26 +1,36 @@
 # YouTube Transcriber API
 
-Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em formato MP3 e disponibilizar através de URLs temporárias.
+Uma API robusta e eficiente para baixar vídeos do YouTube, converter para MP3 e realizar a transcrição automática com detecção do idioma do vídeo. A transcrição é entregue em formato JSON contendo o título do vídeo, o nome do canal e o texto da transcrição.
 
 ![YouTube to MP3](https://img.shields.io/badge/YouTube-MP3-red)
 ![Node.js](https://img.shields.io/badge/Node.js-14%2B-green)
 ![Express](https://img.shields.io/badge/Express-4.x-blue)
 
+---
+
 ## ✨ Características
 
-- ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback
-- 🔄 Suporte a proxy residencial para contornar restrições anti-bot
-- 🎵 Conversão para MP3 em alta qualidade
-- 🔗 URLs temporárias para download
-- ⏱️ Expiração automática após 1 hora
-- 🧹 Limpeza automática de arquivos temporários
+- ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback (proxy residencial, Invidious, YouTube Music, Piped.video)
+- 🎵 Conversão para MP3 de alta qualidade
+- 🔗 URLs temporárias para download dos arquivos convertidos
+- ⏱️ Expiração automática dos arquivos e transcrições (1 hora)
+- 🔄 Transcrição automática do áudio com detecção do idioma do vídeo
+- 📦 Transcrição entregue em JSON com os campos:
+  - `videoTitle`: título do vídeo
+  - `channel`: nome do canal do vídeo
+  - `transcription`: texto da transcrição
+
+---
 
 ## 📋 Pré-requisitos
 
 - Node.js (versão 14 ou superior)
 - npm ou yarn
 - FFmpeg instalado no sistema
-- Python 3 e pip (para yt-dlp)
+- Python 3 e pip (para instalação do yt-dlp)
+- Variáveis de ambiente configuradas (por exemplo, as credenciais do proxy residencial e chave da API do Assembly AI)
+
+---
 
 ## 🔧 Instalação
 
@@ -33,95 +43,123 @@ cd youtube-to-mp3-api
 
 ### 2. Instale as dependências
 
+Instale as dependências do Node.js (observe que agora utilizamos também as bibliotecas _dotenv_ e _axios_):
+
 ```bash
-# Instalar dependências do Node.js
 npm install
+```
 
-# Instalar yt-dlp (substituto moderno do youtube-dl)
-pip3 install --upgrade yt-dlp
+Para instalar as dependências do Python e o FFmpeg, siga as instruções abaixo (em sistemas baseados em Debian/Ubuntu):
 
-# Instalar FFmpeg (se ainda não tiver)
-# Para Ubuntu/Debian:
+```bash
 sudo apt update
-sudo apt install -y ffmpeg
+sudo apt install -y ffmpeg python3 python3-pip
+pip3 install --upgrade yt-dlp
 ```
 
 ### 3. Configure o ambiente
 
-A aplicação está configurada para usar um proxy residencial que ajuda a contornar as restrições anti-bot do YouTube.
+Crie um arquivo `.env` na raiz do projeto e defina as variáveis necessárias, por exemplo:
+
+```env
+PORT=3000
+IPROYAL_USERNAME=seu_usuario
+IPROYAL_PASSWORD=sua_senha
+ASSEMBLY_API_KEY=sua_chave_da_api
+ENABLE_TRANSCRIPTION=true
+```
 
 ### 4. Inicie o servidor
+
+Você pode iniciar o servidor diretamente ou utilizando o PM2 para gerenciamento em segundo plano:
 
 ```bash
 # Diretamente:
 node index.js
 
-# Ou com PM2 para manter rodando em segundo plano:
+# Com PM2:
 pm2 start index.js --name yt2mp3
 ```
 
-Por padrão, o servidor iniciará na porta 3000. Você pode alterar isso definindo a variável de ambiente `PORT`.
+Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa porta definindo a variável de ambiente `PORT`.
 
-## 📝 Como usar
+---
 
-### Converter um vídeo do YouTube para MP3
+## 📝 Como Usar
+
+### Converter um Vídeo do YouTube para MP3 e Transcrição
 
 **Endpoint:** `POST /convert`
 
-**Corpo da requisição (JSON):**
+**Corpo da Requisição (JSON):**
+
 ```json
 {
-  "youtubeUrl": "https://www.youtube.com/watch?v=exemplo"
-  "transcribe": true, // Habilita a transcrição automática do vídeo
-  "language": "auto" // ou um código específico como "pt", "en", "es", etc referente ao idioma da transcrição.
+  "youtubeUrl": "https://www.youtube.com/watch?v=exemplo",
+  "transcribe": true
 }
 ```
 
-**Resposta de sucesso:**
+- Se o campo `transcribe` for `true` e a transcrição estiver habilitada, a API realizará a transcrição automaticamente e retornará uma URL para acessar a transcrição.
+
+**Resposta de Sucesso:**
+
 ```json
 {
   "success": true,
-  "title": "Título do Vídeo",
+  "message": "Tarefa de download iniciada. Transcrição será processada automaticamente após o download.",
+  "taskId": "123e4567-e89b-12d3-a456-426614174000",
+  "statusUrl": "/status/123e4567-e89b-12d3-a456-426614174000",
   "downloadUrl": "/download/123e4567-e89b-12d3-a456-426614174000",
-  "expiresIn": "Uma hora"
+  "estimatedDuration": "Alguns minutos, dependendo do tamanho do vídeo",
+  "transcriptionRequested": true,
+  "transcriptionStatus": "pending",
+  "transcriptionUrl": "/transcription/123e4567-e89b-12d3-a456-426614174000"
 }
 ```
 
-### Baixar o arquivo MP3
+### Baixar o Arquivo MP3
 
 **Endpoint:** `GET /download/:fileId`
 
-Use a URL fornecida na resposta anterior para baixar o arquivo MP3.
+Utilize a URL fornecida na resposta anterior para baixar o arquivo MP3.
 
-### Verificar status da API
+### Obter a Transcrição
 
-**Endpoint:** `GET /status`
+**Endpoint:** `GET /transcription/:fileId`
 
-**Resposta:**
+A transcrição será retornada em formato JSON com a seguinte estrutura:
+
 ```json
 {
-  "status": "online",
-  "version": "1.1.0",
-  "message": "API funcionando normalmente"
+  "videoTitle": "Título do vídeo",
+  "channel": "Nome do canal",
+  "transcription": "Texto da transcrição"
 }
 ```
 
-## 📊 Exemplo de uso com Node.js
+### Verificar o Status da Tarefa
+
+**Endpoint:** `GET /status/:taskId`
+
+Utilize este endpoint para verificar o status da tarefa de download e transcrição.
+
+---
+
+## 📊 Exemplo de Uso com Node.js
 
 ```javascript
 const axios = require('axios');
 const fs = require('fs');
 
-// URL base da API
 const API_URL = 'http://localhost:3000';
 
 async function convertAndDownload(youtubeUrl, outputPath) {
-  // Etapa 1: Solicitar a conversão
-  const conversion = await axios.post(`${API_URL}/convert`, {
-    youtubeUrl: youtubeUrl
-  });
+  // Solicitar a conversão
+  const conversion = await axios.post(`${API_URL}/convert`, { youtubeUrl, transcribe: true });
   
-  // Etapa 2: Baixar o arquivo
+  // Esperar alguns instantes e verificar o status se necessário
+  // (aqui o exemplo baixa o arquivo diretamente após a conclusão da tarefa)
   const response = await axios({
     method: 'GET',
     url: `${API_URL}${conversion.data.downloadUrl}`,
@@ -137,75 +175,64 @@ async function convertAndDownload(youtubeUrl, outputPath) {
   });
 }
 
-// Uso:
+// Exemplo de uso:
 convertAndDownload('https://www.youtube.com/watch?v=exemplo', './musica.mp3')
   .then(() => console.log('Download completo!'))
   .catch(console.error);
 ```
 
-## 📚 Estrutura do projeto
+---
+
+## 📁 Estrutura do Projeto
 
 ```
 youtube-to-mp3-api/
 ├── index.js          # Arquivo principal da API
 ├── package.json      # Dependências e scripts
-└── temp/             # Diretório para arquivos temporários (criado automaticamente)
+├── README.md         # Documentação do projeto
+└── temp/             # Diretório para armazenamento temporário dos arquivos
 ```
 
-## 🔄 Sistema de contorno de restrições
+---
 
-Esta versão aprimorada da API utiliza um sistema de múltiplas abordagens para garantir o download mesmo quando o YouTube restringe acessos:
+## 🔄 Sistema de Fallback e Transcrição
 
-1. **Abordagem 1**: Utiliza proxy residencial para contornar as restrições anti-bot
-2. **Abordagem 2**: Combina proxy residencial com alternativas do Invidious (front-ends alternativos do YouTube)
-3. **Abordagem 3**: Configurações avançadas para yt-dlp que contornam restrições
-4. **Abordagem 4**: Utiliza o YouTube Music como alternativa (às vezes tem menos restrições)
-5. **Abordagem 5**: Tenta download através do Piped.video (outro front-end alternativo)
+Esta API utiliza múltiplas abordagens para garantir o download dos vídeos mesmo em cenários com restrições automatizadas (uso de proxy residencial, Invidious, YouTube Music e Piped.video).
 
-Esse sistema de fallback aumenta significativamente a taxa de sucesso nos downloads, mesmo com as restrições anti-bot do YouTube.
+Além disso, se a transcrição estiver habilitada, o áudio é enviado para o Assembly AI e a transcrição é processada automaticamente. A transcrição é entregue no idioma detectado do vídeo e a resposta JSON inclui:
+- **videoTitle:** Título do vídeo
+- **channel:** Nome do canal
+- **transcription:** Texto da transcrição
 
-## 📝 Notas importantes
+---
 
-- Os arquivos são automaticamente excluídos após uma hora para economizar espaço em disco.
-- Esta API é apenas para uso educacional. Respeite os direitos autorais e os termos de serviço do YouTube.
-- Considere implementar autenticação e limitação de taxa (rate limiting) em ambientes de produção.
+## ⚠️ Solução de Problemas
 
-## 🔧 Solução de problemas
+- **Erro "FFmpeg não encontrado":**  
+  Certifique-se de que o FFmpeg está instalado corretamente. Execute:
+  
+  ```bash
+  ffmpeg -version
+  ```
 
-### Erro "Sign in to confirm you're not a bot"
-Esta versão resolve esse problema usando proxy residencial. Se ainda encontrar esse erro:
-- Verifique se o serviço de proxy está ativo e funcionando
-- Tente outro proxy residencial se necessário
+- **Problemas de Conectividade com o Proxy:**  
+  Verifique as credenciais e a conexão com o proxy residencial configurado no arquivo `.env`.
 
-### Erro "FFmpeg não encontrado"
-Certifique-se de que o FFmpeg está instalado corretamente:
-```bash
-ffmpeg -version
-```
+- **Erro de Transcrição:**  
+  Confirme que a chave da API do Assembly AI está correta e que a transcrição está habilitada via variável de ambiente `ENABLE_TRANSCRIPTION`.
 
-### Processo de conversão lento
-O tempo de processamento depende do tamanho do vídeo original e da capacidade do servidor, além do roteamento através do proxy.
+---
+
+## 🔒 Aviso Legal
+
+Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a devida autorização pode violar as leis de direitos autorais. Utilize esta ferramenta com responsabilidade e sempre em conformidade com as políticas e termos de serviço do YouTube.
+
+---
 
 ## 📄 Licença
 
 Este projeto está licenciado sob a [Licença MIT](LICENSE).
 
-## ⚠️ Aviso legal
+---
 
-Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a permissão dos detentores dos direitos pode violar leis de direitos autorais. Os usuários são responsáveis por garantir que seu uso desta API esteja em conformidade com as leis e regulamentos aplicáveis.
-
-## 🔒 Configuração do Proxy Residencial
-
-Esta versão da API está configurada para usar um proxy residencial da iProyal para contornar as restrições anti-bot do YouTube. Os proxies residenciais funcionam usando IPs de usuários reais, que são tratados com menos restrições pelo YouTube em comparação com IPs de datacenter.
-
-Se você precisar atualizar as credenciais do proxy, edite as linhas no arquivo `index.js` que contêm a URL do proxy:
-
-```javascript
-const proxyUrl = 'http://seu_usuario:sua_senha@geo.iproyal.com:12321';
-```
-
-Para obter um proxy residencial:
-1. Crie uma conta em um provedor como iProyal, Bright Data, Oxylabs, etc.
-2. Configure um proxy residencial para streaming
-3. Obtenha as credenciais e o endpoint
-4. Substitua no código conforme necessário
+Esse README.md abrange a configuração, o uso e os detalhes técnicos da API, incluindo a nova funcionalidade de transcrição que retorna o resultado no formato JSON desejado.

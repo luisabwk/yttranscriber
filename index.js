@@ -1,4 +1,4 @@
-// youtube-to-mp3-api/index.js
+// yttranscriber/index.js
 require('dotenv').config(); // Carregar variáveis do arquivo .env
 
 const express = require('express');
@@ -9,6 +9,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const axios = require('axios');
+const cheerio = require('cheerio'); // Para scraping adicional
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -178,7 +179,7 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
-// Novo Endpoint /stats para buscar estatísticas do vídeo
+// Novo Endpoint /stats para buscar estatísticas do vídeo, com scraping adicional para inscritos
 app.post('/stats', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
@@ -188,12 +189,30 @@ app.post('/stats', async (req, res) => {
     if (!validateYouTubeUrl(youtubeUrl)) {
       return res.status(400).json({ error: 'URL do YouTube inválida' });
     }
+    // Obter metadados do vídeo
     const info = await getVideoInfo(youtubeUrl);
     
-    // Formatar a data de publicação (assumindo info.upload_date no formato YYYYMMDD)
+    // Formatar a data de publicação (assumindo formato YYYYMMDD)
     let uploadDate = 'Unknown';
     if (info.upload_date && info.upload_date.length === 8) {
       uploadDate = `${info.upload_date.slice(0, 4)}-${info.upload_date.slice(4, 6)}-${info.upload_date.slice(6)}`;
+    }
+    
+    // Tentar obter o número de inscritos via yt-dlp ou scraping
+    let subscriberCount = info.channel_subscribers || 0;
+    if (!subscriberCount && info.uploader_url) {
+      try {
+        const channelResponse = await axios.get(info.uploader_url);
+        const $ = cheerio.load(channelResponse.data);
+        const subText = $('#owner-sub-count').text();
+        // Extraímos apenas os dígitos do texto "123 inscritos"
+        const match = subText.match(/(\d[\d,.]*)/);
+        if (match) {
+          subscriberCount = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
+        }
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] Erro ao obter inscritos via scraping:`, err);
+      }
     }
     
     const stats = {
@@ -203,7 +222,7 @@ app.post('/stats', async (req, res) => {
       likes: info.like_count || 0,
       dislikes: info.dislike_count || 0,
       commentCount: info.comment_count || 0,
-      subscriberCount: info.channel_subscribers || 0,
+      subscriberCount: subscriberCount,
       uploadDate: uploadDate
     };
     return res.json(stats);
@@ -558,7 +577,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   }
 }
 
+// ----------------------------------------------------------------
 // Função para obter informações do vídeo
+// ----------------------------------------------------------------
 async function getVideoInfo(youtubeUrl) {
   try {
     console.log(`[${new Date().toISOString()}] Buscando informações do vídeo: ${youtubeUrl}`);
@@ -631,7 +652,9 @@ async function getVideoInfo(youtubeUrl) {
   }
 }
 
+// ----------------------------------------------------------------
 // Função para transcrever áudio usando Assembly AI
+// ----------------------------------------------------------------
 async function transcribeAudio(audioFilePath, fileId) {
   try {
     console.log(`[${new Date().toISOString()}] Iniciando transcrição para ${fileId}`);

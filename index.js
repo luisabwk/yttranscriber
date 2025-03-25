@@ -19,6 +19,28 @@ function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
 }
 
+// Função para buscar o número de inscritos diretamente na página do vídeo
+async function fetchSubscriberCountFromVideoPage(videoUrl) {
+  try {
+    console.log(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Buscando HTML da página: ${videoUrl}`);
+    const response = await axios.get(videoUrl);
+    const $ = cheerio.load(response.data);
+    // Utiliza o seletor direto para pegar o conteúdo dentro do elemento com id owner-sub-count
+    const subText = $('#owner-sub-count').text();
+    console.log(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Texto obtido de #owner-sub-count: "${subText}"`);
+    const match = subText.match(/(\d[\d,.]*)/);
+    if (match) {
+      const count = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
+      console.log(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Número de inscritos extraído: ${count}`);
+      return count;
+    }
+    return 0;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Erro:`, error.message);
+    return 0;
+  }
+}
+
 // Pasta para armazenar os arquivos temporários
 const TEMP_DIR = path.join(__dirname, 'temp');
 if (!fs.existsSync(TEMP_DIR)) {
@@ -204,27 +226,13 @@ app.post('/stats', async (req, res) => {
       console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Obter número de inscritos
+    // Obter número de inscritos: primeiro via metadados, se não, tenta scraping usando a URL do vídeo
     let subscriberCount = info.channel_subscribers || 0;
     console.log(`[${new Date().toISOString()}] /stats - channel_subscribers inicial: ${subscriberCount}`);
-    if (!subscriberCount && info.uploader_url) {
-      try {
-        console.log(`[${new Date().toISOString()}] /stats - Fazendo scraping na URL do canal: ${info.uploader_url}`);
-        const channelResponse = await axios.get(info.uploader_url);
-        const $ = cheerio.load(channelResponse.data);
-        // Usando o seletor com a classe para garantir que estamos buscando dentro do ytd-video-owner-renderer
-        const subText = $('ytd-video-owner-renderer #owner-sub-count').text();
-        console.log(`[${new Date().toISOString()}] /stats - Texto obtido de "ytd-video-owner-renderer #owner-sub-count": "${subText}"`);
-        const match = subText.match(/(\d[\d,.]*)/);
-        if (match) {
-          subscriberCount = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
-          console.log(`[${new Date().toISOString()}] /stats - Subscriber count extraído via scraping: ${subscriberCount}`);
-        } else {
-          console.log(`[${new Date().toISOString()}] /stats - Nenhum número encontrado no texto.`);
-        }
-      } catch (err) {
-        console.error(`[${new Date().toISOString()}] /stats - Erro ao obter inscritos via scraping:`, err);
-      }
+    if (!subscriberCount) {
+      console.log(`[${new Date().toISOString()}] /stats - Tentando extrair inscritos da página do vídeo: ${youtubeUrl}`);
+      subscriberCount = await fetchSubscriberCountFromVideoPage(youtubeUrl);
+      console.log(`[${new Date().toISOString()}] /stats - Subscriber count extraído via scraping: ${subscriberCount}`);
     }
     
     const stats = {

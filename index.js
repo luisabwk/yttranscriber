@@ -9,7 +9,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const axios = require('axios');
-const cheerio = require('cheerio'); // Para scraping adicional
+const cheerio = require('cheerio'); // Biblioteca para scraping
 
 const app = express();
 const PORT = process.env.PORT || 3000;

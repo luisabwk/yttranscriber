@@ -1,110 +1,97 @@
-# YouTube Transcriber API
-
+yttranscriber
 Uma API robusta e eficiente para baixar vídeos do YouTube, converter para MP3 e realizar a transcrição automática com detecção do idioma do vídeo. A transcrição é entregue em formato JSON contendo o título do vídeo, o nome do canal e o texto da transcrição.
 
-![YouTube to MP3](https://img.shields.io/badge/YouTube-MP3-red)
-![Node.js](https://img.shields.io/badge/Node.js-14%2B-green)
-![Express](https://img.shields.io/badge/Express-4.x-blue)
 
----
 
-## ✨ Características
+✨ Características
+⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback (proxy residencial, Invidious, YouTube Music, Piped.video)
 
-- ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback (proxy residencial, Invidious, YouTube Music, Piped.video)
-- 🎵 Conversão para MP3 de alta qualidade
-- 🔗 URLs temporárias para download dos arquivos convertidos
-- ⏱️ Expiração automática dos arquivos e transcrições (1 hora)
-- 🔄 Transcrição automática do áudio com detecção do idioma do vídeo
-- 📦 Transcrição entregue em JSON com os campos:
-  - `videoTitle`: título do vídeo
-  - `channel`: nome do canal do vídeo
-  - `transcription`: texto da transcrição
+🎵 Conversão para MP3 de alta qualidade
 
----
+🔗 URLs temporárias para download dos arquivos convertidos
 
-## 📋 Pré-requisitos
+⏱️ Expiração automática dos arquivos e transcrições (1 hora)
 
-- Node.js (versão 14 ou superior)
-- npm ou yarn
-- FFmpeg instalado no sistema
-- Python 3 e pip (para instalação do yt-dlp)
-- Variáveis de ambiente configuradas (por exemplo, as credenciais do proxy residencial e chave da API do Assembly AI)
+🔄 Transcrição automática do áudio com detecção do idioma do vídeo
 
----
+📦 Transcrição entregue em JSON com os campos:
 
-## 🔧 Instalação
+videoTitle: título do vídeo
 
-### 1. Clone o repositório
+channel: nome do canal do vídeo
 
-```bash
-git clone https://github.com/seu-usuario/youtube-to-mp3-api.git
-cd youtube-to-mp3-api
-```
+transcription: texto da transcrição
 
-### 2. Instale as dependências
+📋 Pré-requisitos
+Node.js (versão 14 ou superior)
 
-Instale as dependências do Node.js (observe que agora utilizamos também as bibliotecas _dotenv_ e _axios_):
+npm ou yarn
 
-```bash
+FFmpeg instalado no sistema
+
+Python 3 e pip (para instalação do yt-dlp)
+
+Variáveis de ambiente configuradas (por exemplo, as credenciais do proxy residencial e chave da API do Assembly AI)
+
+🔧 Instalação
+1. Clone o repositório
+bash
+Copiar
+git clone https://github.com/seu-usuario/yttranscriber.git
+cd yttranscriber
+2. Instale as dependências
+Instale as dependências do Node.js (observe que agora utilizamos também as bibliotecas dotenv e axios):
+
+bash
+Copiar
 npm install
-```
-
 Para instalar as dependências do Python e o FFmpeg, siga as instruções abaixo (em sistemas baseados em Debian/Ubuntu):
 
-```bash
+bash
+Copiar
 sudo apt update
 sudo apt install -y ffmpeg python3 python3-pip
 pip3 install --upgrade yt-dlp
-```
+3. Configure o ambiente
+Crie um arquivo .env na raiz do projeto e defina as variáveis necessárias, por exemplo:
 
-### 3. Configure o ambiente
-
-Crie um arquivo `.env` na raiz do projeto e defina as variáveis necessárias, por exemplo:
-
-```env
+env
+Copiar
 PORT=3000
 IPROYAL_USERNAME=seu_usuario
 IPROYAL_PASSWORD=sua_senha
 ASSEMBLY_API_KEY=sua_chave_da_api
 ENABLE_TRANSCRIPTION=true
-```
-
-### 4. Inicie o servidor
-
+4. Inicie o servidor
 Você pode iniciar o servidor diretamente ou utilizando o PM2 para gerenciamento em segundo plano:
 
-```bash
+bash
+Copiar
 # Diretamente:
 node index.js
 
 # Com PM2:
 pm2 start index.js --name yt2mp3
-```
+Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa porta definindo a variável de ambiente PORT.
 
-Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa porta definindo a variável de ambiente `PORT`.
+📝 Como Usar
+Converter um Vídeo do YouTube para MP3 e Transcrição
+Endpoint: POST /convert
 
----
+Corpo da Requisição (JSON):
 
-## 📝 Como Usar
-
-### Converter um Vídeo do YouTube para MP3 e Transcrição
-
-**Endpoint:** `POST /convert`
-
-**Corpo da Requisição (JSON):**
-
-```json
+json
+Copiar
 {
   "youtubeUrl": "https://www.youtube.com/watch?v=exemplo",
   "transcribe": true
 }
-```
+Se o campo transcribe for true e a transcrição estiver habilitada, a API realizará a transcrição automaticamente e retornará uma URL para acessar a transcrição.
 
-- Se o campo `transcribe` for `true` e a transcrição estiver habilitada, a API realizará a transcrição automaticamente e retornará uma URL para acessar a transcrição.
+Resposta de Sucesso:
 
-**Resposta de Sucesso:**
-
-```json
+json
+Copiar
 {
   "success": true,
   "message": "Tarefa de download iniciada. Transcrição será processada automaticamente após o download.",
@@ -116,39 +103,31 @@ Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa po
   "transcriptionStatus": "pending",
   "transcriptionUrl": "/transcription/123e4567-e89b-12d3-a456-426614174000"
 }
-```
-
-### Baixar o Arquivo MP3
-
-**Endpoint:** `GET /download/:fileId`
+Baixar o Arquivo MP3
+Endpoint: GET /download/:fileId
 
 Utilize a URL fornecida na resposta anterior para baixar o arquivo MP3.
 
-### Obter a Transcrição
-
-**Endpoint:** `GET /transcription/:fileId`
+Obter a Transcrição
+Endpoint: GET /transcription/:fileId
 
 A transcrição será retornada em formato JSON com a seguinte estrutura:
 
-```json
+json
+Copiar
 {
   "videoTitle": "Título do vídeo",
   "channel": "Nome do canal",
   "transcription": "Texto da transcrição"
 }
-```
-
-### Verificar o Status da Tarefa
-
-**Endpoint:** `GET /status/:taskId`
+Verificar o Status da Tarefa
+Endpoint: GET /status/:taskId
 
 Utilize este endpoint para verificar o status da tarefa de download e transcrição.
 
----
-
-## 📊 Exemplo de Uso com Node.js
-
-```javascript
+📊 Exemplo de Uso com Node.js
+javascript
+Copiar
 const axios = require('axios');
 const fs = require('fs');
 
@@ -179,60 +158,41 @@ async function convertAndDownload(youtubeUrl, outputPath) {
 convertAndDownload('https://www.youtube.com/watch?v=exemplo', './musica.mp3')
   .then(() => console.log('Download completo!'))
   .catch(console.error);
-```
-
----
-
-## 📁 Estrutura do Projeto
-
-```
-youtube-to-mp3-api/
+📁 Estrutura do Projeto
+bash
+Copiar
+yttranscriber/
 ├── index.js          # Arquivo principal da API
 ├── package.json      # Dependências e scripts
 ├── README.md         # Documentação do projeto
 └── temp/             # Diretório para armazenamento temporário dos arquivos
-```
-
----
-
-## 🔄 Sistema de Fallback e Transcrição
-
+🔄 Sistema de Fallback e Transcrição
 Esta API utiliza múltiplas abordagens para garantir o download dos vídeos mesmo em cenários com restrições automatizadas (uso de proxy residencial, Invidious, YouTube Music e Piped.video).
 
 Além disso, se a transcrição estiver habilitada, o áudio é enviado para o Assembly AI e a transcrição é processada automaticamente. A transcrição é entregue no idioma detectado do vídeo e a resposta JSON inclui:
-- **videoTitle:** Título do vídeo
-- **channel:** Nome do canal
-- **transcription:** Texto da transcrição
 
----
+videoTitle: Título do vídeo
 
-## ⚠️ Solução de Problemas
+channel: Nome do canal
 
-- **Erro "FFmpeg não encontrado":**  
-  Certifique-se de que o FFmpeg está instalado corretamente. Execute:
-  
-  ```bash
-  ffmpeg -version
-  ```
+transcription: Texto da transcrição
 
-- **Problemas de Conectividade com o Proxy:**  
-  Verifique as credenciais e a conexão com o proxy residencial configurado no arquivo `.env`.
+⚠️ Solução de Problemas
+Erro "FFmpeg não encontrado":
+Certifique-se de que o FFmpeg está instalado corretamente. Execute:
 
-- **Erro de Transcrição:**  
-  Confirme que a chave da API do Assembly AI está correta e que a transcrição está habilitada via variável de ambiente `ENABLE_TRANSCRIPTION`.
+bash
+Copiar
+ffmpeg -version
+Problemas de Conectividade com o Proxy:
+Verifique as credenciais e a conexão com o proxy residencial configurado no arquivo .env.
 
----
+Erro de Transcrição:
+Confirme que a chave da API do Assembly AI está correta e que a transcrição está habilitada via variável de ambiente ENABLE_TRANSCRIPTION.
 
-## 🔒 Aviso Legal
-
+🔒 Aviso Legal
 Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a devida autorização pode violar as leis de direitos autorais. Utilize esta ferramenta com responsabilidade e sempre em conformidade com as políticas e termos de serviço do YouTube.
 
----
+📄 Licença
+Este projeto está licenciado sob a Licença MIT.
 
-## 📄 Licença
-
-Este projeto está licenciado sob a [Licença MIT](LICENSE).
-
----
-
-Esse README.md abrange a configuração, o uso e os detalhes técnicos da API, incluindo a nova funcionalidade de transcrição que retorna o resultado no formato JSON desejado.

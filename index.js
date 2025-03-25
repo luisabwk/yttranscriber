@@ -25,7 +25,7 @@ const EXPIRATION_TIME = 60 * 60 * 1000;
 // Armazenamento de arquivos temporários
 const tempFiles = new Map();
 
-// Adicionar um mapa para rastrear tarefas em andamento
+// Mapa para rastrear tarefas em andamento
 const pendingTasks = new Map();
 
 // Configuração da API Assembly AI
@@ -105,7 +105,6 @@ setInterval(() => {
       }
       tempFiles.delete(fileId);
       
-      // Remover tarefas relacionadas
       if (pendingTasks.has(fileId)) {
         pendingTasks.delete(fileId);
       }
@@ -123,7 +122,7 @@ setInterval(() => {
   if (countRemoved > 0 || transcriptionsRemoved > 0) {
     console.log(`[${new Date().toISOString()}] Limpeza automática: ${countRemoved} arquivo(s) e ${transcriptionsRemoved} transcrição(ões) expirado(s) removido(s)`);
   }
-}, 15 * 60 * 1000); // Verificar a cada 15 minutos
+}, 15 * 60 * 1000);
 
 // Exportar app para testes
 module.exports = app;
@@ -178,11 +177,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  // Configure o proxy com as credenciais fornecidas do arquivo .env
   const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
   const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
   
-  // Extrair ID do vídeo para uso em várias abordagens
   let videoId = '';
   if (youtubeUrl.includes('youtube.com/watch?v=')) {
     videoId = new URL(youtubeUrl).searchParams.get('v');
@@ -207,8 +204,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
       '--no-check-certificate',
       '--geo-bypass',
       '--ignore-errors',
-      '--limit-rate', '500K', // Limitando a taxa de download para evitar detecção
-      '--user-agent', userAgent, // User agent mais comum
+      '--limit-rate', '500K',
+      '--user-agent', userAgent,
       '-o', outputTemplate,
       youtubeUrl
     ];
@@ -223,89 +220,6 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
     try {
       console.log(`[${new Date().toISOString()}] Tentando abordagem 2: Proxy Invidious`);
       
-      // Verificar se tem transcrição e se foi solicitada inclusão
-      if (includeTranscription && transcriptions.has(taskId)) {
-        response.transcription = {
-          text: transcriptions.get(taskId).text,
-          language: transcriptions.get(taskId).language,
-          completedAt: new Date(transcriptions.get(taskId).created).toISOString()
-        };
-      }
-      
-      return res.json(response);
-});
-
-// Rota para obter a transcrição
-app.get('/transcription/:fileId', (req, res) => {
-  const { fileId } = req.params;
-  const format = req.query.format || 'text'; // Formato padrão: texto simples
-  
-  if (!transcriptions.has(fileId)) {
-    return res.status(404).json({ error: 'Transcrição não encontrada ou expirada' });
-  }
-  
-  const transcription = transcriptions.get(fileId);
-  
-  // Verificar se a transcrição expirou
-  if (Date.now() > transcription.expiresAt) {
-    transcriptions.delete(fileId);
-    return res.status(404).json({ error: 'Transcrição expirada' });
-  }
-  
-  // Retornar no formato solicitado
-  switch (format.toLowerCase()) {
-    case 'json':
-      return res.json({
-        text: transcription.text,
-        language: transcription.language,
-        created: new Date(transcription.created).toISOString(),
-        expiresAt: new Date(transcription.expiresAt).toISOString()
-      });
-    case 'text':
-    default:
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      return res.send(transcription.text);
-  }
-});
-    }
-    return res.status(404).json({ error: 'Tarefa não encontrada' });
-  }
-  
-  const taskInfo = pendingTasks.get(taskId);
-  const response = {
-    taskId,
-    status: taskInfo.status,
-    title: taskInfo.title,
-    created: new Date(taskInfo.created).toISOString(),
-    downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
-    error: taskInfo.error || null
-  };
-  
-  // Adicionar informações de transcrição se solicitado
-  if (taskInfo.transcriptionRequested) {
-    response.transcriptionRequested = true;
-    response.transcriptionStatus = taskInfo.transcriptionStatus;
-    response.detectedLanguage = taskInfo.detectedLanguage || null;
-    
-    if (taskInfo.hasTranscription && includeTranscription && transcriptions.has(taskId)) {
-      response.transcription = {
-        text: transcriptions.get(taskId).text,
-        language: transcriptions.get(taskId).language,
-        completedAt: new Date(transcriptions.get(taskId).created).toISOString()
-      };
-    }
-    
-    if (taskInfo.transcriptionStatus === 'completed') {
-      response.transcriptionUrl = taskInfo.transcriptionUrl;
-    }
-    
-    if (taskInfo.transcriptionError) {
-      response.transcriptionError = taskInfo.transcriptionError;
-    }
-  }
-  
-  res.json(response);
-}); Lista de instâncias Invidious para tentar
       const invidiousInstances = [
         'yewtu.be',
         'invidious.snopyta.org',
@@ -315,7 +229,6 @@ app.get('/transcription/:fileId', (req, res) => {
         'inv.riverside.rocks'
       ];
       
-      // Tentar cada instância
       for (const instance of invidiousInstances) {
         try {
           const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
@@ -329,7 +242,7 @@ app.get('/transcription/:fileId', (req, res) => {
             '--no-check-certificate',
             '--geo-bypass',
             '--ignore-errors',
-            '--proxy', proxyUrl, // Usar proxy residencial para Invidious
+            '--proxy', proxyUrl,
             '--limit-rate', '500K',
             '--user-agent', userAgent,
             '-o', outputTemplate,
@@ -341,15 +254,14 @@ app.get('/transcription/:fileId', (req, res) => {
           return { success: true };
         } catch (err) {
           console.log(`[${new Date().toISOString()}] Falha com ${instance}: ${err.message}`);
-          // Continue para a próxima instância
         }
       }
       
       throw new Error('Todas as instâncias Invidious falharam');
-    } catch (error3) {
-      console.log(`[${new Date().toISOString()}] Abordagem 2 (Invidious) falhou: ${error3.message}`);
+    } catch (error2) {
+      console.log(`[${new Date().toISOString()}] Abordagem 2 (Invidious) falhou: ${error2.message}`);
       
-      // Abordagem 3: Tentar com o modo nativo e configurações avançadas
+      // Abordagem 3: Configurações avançadas
       try {
         console.log(`[${new Date().toISOString()}] Tentando abordagem 3: Configurações avançadas`);
         const advancedOptions = [
@@ -362,7 +274,7 @@ app.get('/transcription/:fileId', (req, res) => {
           '--geo-bypass',
           '--ignore-errors',
           '--no-playlist',
-          '--proxy', proxyUrl, // Usar proxy residencial
+          '--proxy', proxyUrl,
           '--limit-rate', '500K',
           '--user-agent', userAgent,
           '--extractor-args', 'youtube:skip_webpage=True',
@@ -373,10 +285,10 @@ app.get('/transcription/:fileId', (req, res) => {
         await executeYtDlp(advancedOptions);
         console.log(`[${new Date().toISOString()}] Abordagem 3 bem-sucedida!`);
         return { success: true };
-      } catch (error4) {
-        console.log(`[${new Date().toISOString()}] Abordagem 3 falhou: ${error4.message}`);
+      } catch (error3) {
+        console.log(`[${new Date().toISOString()}] Abordagem 3 falhou: ${error3.message}`);
         
-        // Abordagem 4: Tentar YouTube Music
+        // Abordagem 4: YouTube Music
         try {
           console.log(`[${new Date().toISOString()}] Tentando abordagem 4: YouTube Music`);
           const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
@@ -391,7 +303,7 @@ app.get('/transcription/:fileId', (req, res) => {
             '--geo-bypass',
             '--ignore-errors',
             '--no-playlist',
-            '--proxy', proxyUrl, // Usar proxy residencial
+            '--proxy', proxyUrl,
             '--limit-rate', '500K',
             '--user-agent', userAgent,
             '-o', outputTemplate,
@@ -401,10 +313,10 @@ app.get('/transcription/:fileId', (req, res) => {
           await executeYtDlp(ytMusicOptions);
           console.log(`[${new Date().toISOString()}] Abordagem 4 bem-sucedida!`);
           return { success: true };
-        } catch (error5) {
-          console.log(`[${new Date().toISOString()}] Abordagem 4 falhou: ${error5.message}`);
+        } catch (error4) {
+          console.log(`[${new Date().toISOString()}] Abordagem 4 falhou: ${error4.message}`);
           
-          // Abordagem 5: tentativa final com Piped (outro front-end alternativo)
+          // Abordagem 5: Piped.video
           try {
             console.log(`[${new Date().toISOString()}] Tentando abordagem 5: Piped.video`);
             
@@ -420,7 +332,7 @@ app.get('/transcription/:fileId', (req, res) => {
               '--geo-bypass',
               '--ignore-errors',
               '--no-playlist',
-              '--proxy', proxyUrl, // Usar proxy residencial
+              '--proxy', proxyUrl,
               '--limit-rate', '500K',
               '--user-agent', userAgent,
               '--force-ipv4',
@@ -431,8 +343,8 @@ app.get('/transcription/:fileId', (req, res) => {
             await executeYtDlp(pipedOptions);
             console.log(`[${new Date().toISOString()}] Abordagem 5 bem-sucedida!`);
             return { success: true };
-          } catch (error6) {
-            console.log(`[${new Date().toISOString()}] Abordagem 5 falhou: ${error6.message}`);
+          } catch (error5) {
+            console.log(`[${new Date().toISOString()}] Abordagem 5 falhou: ${error5.message}`);
             throw new Error('Todas as abordagens de download falharam. O YouTube está bloqueando acessos automatizados.');
           }
         }
@@ -441,12 +353,11 @@ app.get('/transcription/:fileId', (req, res) => {
   }
 }
 
-// Função para obter informações do vídeo (com tratamento de erro avançado)
+// Função para obter informações do vídeo
 async function getVideoInfo(youtubeUrl) {
   try {
     console.log(`[${new Date().toISOString()}] Buscando informações do vídeo: ${youtubeUrl}`);
     
-    // Extrair ID do vídeo
     let videoId = '';
     if (youtubeUrl.includes('youtube.com/watch?v=')) {
       videoId = new URL(youtubeUrl).searchParams.get('v');
@@ -458,11 +369,9 @@ async function getVideoInfo(youtubeUrl) {
       throw new Error('Não foi possível extrair o ID do vídeo');
     }
     
-    // Configuração do proxy residencial do arquivo .env
     const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     
-    // Primeira tentativa: usar proxy residencial
     try {
       console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial`);
       
@@ -481,7 +390,6 @@ async function getVideoInfo(youtubeUrl) {
     } catch (err) {
       console.log(`[${new Date().toISOString()}] Falha ao obter informações via proxy residencial: ${err.message}`);
       
-      // Tentar através de Invidious como fallback
       try {
         console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
         
@@ -501,7 +409,6 @@ async function getVideoInfo(youtubeUrl) {
       } catch (err2) {
         console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err2.message}`);
         
-        // Tente diretamente com flags especiais como fallback
         try {
           const info = await youtubedl(youtubeUrl, {
             dumpSingleJson: true,
@@ -526,11 +433,7 @@ async function getVideoInfo(youtubeUrl) {
     }
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
-    
-    // Se não conseguir obter informações, retorne um objeto com título genérico
-    return {
-      title: `YouTube Video - ${videoId || 'Unknown'}`
-    };
+    return { title: `YouTube Video - ${videoId || 'Unknown'}` };
   }
 }
 
@@ -547,19 +450,16 @@ async function transcribeAudio(audioFilePath, fileId) {
       };
     }
 
-    // Atualizar o status da tarefa
     if (pendingTasks.has(fileId)) {
       const taskInfo = pendingTasks.get(fileId);
       taskInfo.transcriptionStatus = 'uploading';
       pendingTasks.set(fileId, taskInfo);
     }
 
-    // Ler o arquivo de áudio
     const audioFile = fs.readFileSync(audioFilePath);
     const audioSize = fs.statSync(audioFilePath).size;
     console.log(`[${new Date().toISOString()}] Tamanho do arquivo de áudio: ${audioSize} bytes`);
 
-    // Upload do áudio para Assembly AI
     const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
       headers: {
         'Content-Type': 'application/octet-stream',
@@ -572,17 +472,15 @@ async function transcribeAudio(audioFilePath, fileId) {
     const audioUrl = uploadResponse.data.upload_url;
     console.log(`[${new Date().toISOString()}] Áudio enviado com sucesso para Assembly AI: ${audioUrl}`);
 
-    // Atualizar status
     if (pendingTasks.has(fileId)) {
       const taskInfo = pendingTasks.get(fileId);
       taskInfo.transcriptionStatus = 'processing';
       pendingTasks.set(fileId, taskInfo);
     }
 
-    // Iniciar a transcrição
     const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
       audio_url: audioUrl,
-      language_detection: true // Detectar automaticamente o idioma
+      language_detection: true
     }, {
       headers: {
         'Authorization': ASSEMBLY_API_KEY,
@@ -593,12 +491,11 @@ async function transcribeAudio(audioFilePath, fileId) {
     const transcriptId = transcriptResponse.data.id;
     console.log(`[${new Date().toISOString()}] Transcrição iniciada com ID: ${transcriptId}`);
 
-    // Verificar o status da transcrição até que esteja completa
     let transcriptResult;
     let isCompleted = false;
     
     while (!isCompleted) {
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Esperar 3 segundos entre verificações
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
       const checkResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
         headers: {
@@ -617,20 +514,24 @@ async function transcribeAudio(audioFilePath, fileId) {
       }
     }
 
-    // Obter o texto da transcrição (sem formatação markdown)
     const transcriptionText = transcriptResult.text;
     const detectedLanguage = transcriptResult.language_code || 'Não detectado';
-    
-    // Salvar a transcrição como texto simples
+
+    // Recuperar informações do vídeo a partir da tarefa pendente
+    const taskInfo = pendingTasks.get(fileId) || {};
+    const videoTitle = taskInfo.title || `YouTube Video - ${fileId}`;
+    const channel = taskInfo.channel || 'Unknown';
+
     transcriptions.set(fileId, {
       text: transcriptionText,
       raw: transcriptResult,
       language: detectedLanguage,
       created: Date.now(),
-      expiresAt: Date.now() + EXPIRATION_TIME
+      expiresAt: Date.now() + EXPIRATION_TIME,
+      videoTitle,
+      channel
     });
 
-    // Atualizar o status da tarefa
     if (pendingTasks.has(fileId)) {
       const taskInfo = pendingTasks.get(fileId);
       taskInfo.transcriptionStatus = 'completed';
@@ -649,7 +550,6 @@ async function transcribeAudio(audioFilePath, fileId) {
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Erro na transcrição:`, error.message);
     
-    // Atualizar o status da tarefa
     if (pendingTasks.has(fileId)) {
       const taskInfo = pendingTasks.get(fileId);
       taskInfo.transcriptionStatus = 'failed';
@@ -664,7 +564,7 @@ async function transcribeAudio(audioFilePath, fileId) {
   }
 }
 
-// Modificar a rota /convert para processar a solicitação em segundo plano
+// Rota /convert para processar a solicitação em segundo plano
 app.post('/convert', async (req, res) => {
   try {
     const { youtubeUrl, transcribe } = req.body;
@@ -673,29 +573,25 @@ app.post('/convert', async (req, res) => {
       return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
     }
     
-    // Validar a URL do YouTube
     if (!validateYouTubeUrl(youtubeUrl)) {
       return res.status(400).json({ error: 'URL do YouTube inválida' });
     }
     
     console.log(`[${new Date().toISOString()}] Processando URL: ${youtubeUrl}`);
     
-    // Gerar ID único para o arquivo e a tarefa
     const fileId = uuidv4();
     const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
     const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
     
-    // Verificar se a transcrição foi solicitada
     const shouldTranscribe = (transcribe === true || transcribe === 'true') && ENABLE_TRANSCRIPTION;
     
-    // Obter informações básicas do vídeo, mas não esperar pela conclusão completa
     let videoTitle = `YouTube Video - ${fileId}`;
     let taskStatus = 'pending';
     
-    // Registrar a tarefa como pendente
     pendingTasks.set(fileId, {
       status: taskStatus,
       title: videoTitle,
+      channel: 'Unknown',
       url: youtubeUrl,
       created: Date.now(),
       downloadUrl: `/download/${fileId}`,
@@ -704,29 +600,26 @@ app.post('/convert', async (req, res) => {
       hasTranscription: false
     });
     
-    // Iniciar o processo de download em segundo plano
+    // Obter informações do vídeo e atualizar título e canal
+    try {
+      const videoInfo = await getVideoInfo(youtubeUrl);
+      videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
+      const channel = videoInfo.uploader || videoInfo.channel || 'Unknown';
+      
+      if (pendingTasks.has(fileId)) {
+        const taskInfo = pendingTasks.get(fileId);
+        taskInfo.title = videoTitle;
+        taskInfo.channel = channel;
+        pendingTasks.set(fileId, taskInfo);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
+    }
+    
     (async () => {
       try {
-        // Obter informações do vídeo
-        try {
-          const videoInfo = await getVideoInfo(youtubeUrl);
-          videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
-          const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
-          
-          // Atualizar o título da tarefa
-          if (pendingTasks.has(fileId)) {
-            const taskInfo = pendingTasks.get(fileId);
-            taskInfo.title = videoTitle;
-            pendingTasks.set(fileId, taskInfo);
-          }
-        } catch (error) {
-          console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
-        }
-        
-        // Baixar o vídeo
         await downloadYouTubeAudio(youtubeUrl, videoPath);
         
-        // Verificar se o arquivo foi baixado
         const possiblePaths = [
           videoPath,
           videoPath.replace('.mp4', '.mp3'),
@@ -746,7 +639,6 @@ app.post('/convert', async (req, res) => {
           throw new Error('Arquivo baixado não encontrado. O download falhou.');
         }
         
-        // Se o arquivo baixado não for MP3, converter para MP3
         if (!existingFile.endsWith('.mp3')) {
           await new Promise((resolve, reject) => {
             ffmpeg(existingFile)
@@ -766,7 +658,6 @@ app.post('/convert', async (req, res) => {
           fs.renameSync(existingFile, audioPath);
         }
         
-        // Armazenar informações do arquivo no mapa de arquivos temporários
         const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
         tempFiles.set(fileId, {
           path: audioPath,
@@ -774,27 +665,21 @@ app.post('/convert', async (req, res) => {
           expiresAt: Date.now() + EXPIRATION_TIME
         });
         
-        // Marcar a tarefa de download como concluída
         if (pendingTasks.has(fileId)) {
           const taskInfo = pendingTasks.get(fileId);
           taskInfo.status = 'completed';
           pendingTasks.set(fileId, taskInfo);
         }
         
-        // Iniciar transcrição se solicitado
         if (shouldTranscribe) {
           console.log(`[${new Date().toISOString()}] Iniciando processo de transcrição para ${fileId}`);
-          
-          // Não aguardar a conclusão da transcrição, executar em segundo plano
           transcribeAudio(audioPath, fileId).then(transcriptResult => {
-            console.log(`[${new Date().toISOString()}] Resultado da transcrição:`, 
-                       transcriptResult.success ? 'Sucesso' : 'Falha');
+            console.log(`[${new Date().toISOString()}] Resultado da transcrição:`, transcriptResult.success ? 'Sucesso' : 'Falha');
           }).catch(err => {
             console.error(`[${new Date().toISOString()}] Erro ao iniciar transcrição:`, err);
           });
         }
         
-        // Configurar limpeza do arquivo
         setTimeout(() => {
           if (tempFiles.has(fileId)) {
             const fileInfo = tempFiles.get(fileId);
@@ -803,11 +688,9 @@ app.post('/convert', async (req, res) => {
             }
             tempFiles.delete(fileId);
           }
-          // Também remover da lista de tarefas pendentes
           if (pendingTasks.has(fileId)) {
             pendingTasks.delete(fileId);
           }
-          // Remover transcrição
           if (transcriptions.has(fileId)) {
             transcriptions.delete(fileId);
           }
@@ -816,7 +699,6 @@ app.post('/convert', async (req, res) => {
         console.log(`[${new Date().toISOString()}] Processamento concluído para ${fileId}`);
       } catch (error) {
         console.error(`[${new Date().toISOString()}] Erro no processamento:`, error);
-        // Marcar a tarefa como falha
         if (pendingTasks.has(fileId)) {
           const taskInfo = pendingTasks.get(fileId);
           taskInfo.status = 'failed';
@@ -826,7 +708,6 @@ app.post('/convert', async (req, res) => {
       }
     })();
     
-    // Responder imediatamente com o ID da tarefa e URL de status
     const response = {
       success: true,
       message: 'Tarefa de download iniciada',
@@ -836,7 +717,6 @@ app.post('/convert', async (req, res) => {
       estimatedDuration: 'Alguns minutos, dependendo do tamanho do vídeo'
     };
     
-    // Adicionar informações de transcrição se solicitada
     if (shouldTranscribe) {
       response.transcriptionRequested = true;
       response.transcriptionStatus = 'pending';
@@ -852,13 +732,12 @@ app.post('/convert', async (req, res) => {
   }
 });
 
-// Adicionar rota para verificar o status da tarefa
+// Rota para verificar o status da tarefa
 app.get('/status/:taskId', (req, res) => {
   const { taskId } = req.params;
   const includeTranscription = req.query.includeTranscription === 'true';
   
   if (!pendingTasks.has(taskId)) {
-    // Verificar se já foi concluído e está disponível para download
     if (tempFiles.has(taskId)) {
       const response = {
         status: 'completed',
@@ -866,4 +745,72 @@ app.get('/status/:taskId', (req, res) => {
         expiresAt: new Date(tempFiles.get(taskId).expiresAt).toISOString()
       };
       
-      //
+      if (includeTranscription && transcriptions.has(taskId)) {
+        response.transcription = {
+          text: transcriptions.get(taskId).text,
+          language: transcriptions.get(taskId).language,
+          completedAt: new Date(transcriptions.get(taskId).created).toISOString()
+        };
+      }
+      
+      return res.json(response);
+    }
+    return res.status(404).json({ error: 'Tarefa não encontrada' });
+  }
+  
+  const taskInfo = pendingTasks.get(taskId);
+  const response = {
+    taskId,
+    status: taskInfo.status,
+    title: taskInfo.title,
+    created: new Date(taskInfo.created).toISOString(),
+    downloadUrl: taskInfo.status === 'completed' ? taskInfo.downloadUrl : null,
+    error: taskInfo.error || null
+  };
+  
+  if (taskInfo.transcriptionRequested) {
+    response.transcriptionRequested = true;
+    response.transcriptionStatus = taskInfo.transcriptionStatus;
+    response.detectedLanguage = taskInfo.detectedLanguage || null;
+    
+    if (taskInfo.hasTranscription && includeTranscription && transcriptions.has(taskId)) {
+      response.transcription = {
+        text: transcriptions.get(taskId).text,
+        language: transcriptions.get(taskId).language,
+        completedAt: new Date(transcriptions.get(taskId).created).toISOString()
+      };
+    }
+    
+    if (taskInfo.transcriptionStatus === 'completed') {
+      response.transcriptionUrl = taskInfo.transcriptionUrl;
+    }
+    
+    if (taskInfo.transcriptionError) {
+      response.transcriptionError = taskInfo.transcriptionError;
+    }
+  }
+  
+  res.json(response);
+});
+
+// Rota para obter a transcrição com estrutura JSON customizada
+app.get('/transcription/:fileId', (req, res) => {
+  const { fileId } = req.params;
+  
+  if (!transcriptions.has(fileId)) {
+    return res.status(404).json({ error: 'Transcrição não encontrada ou expirada' });
+  }
+  
+  const transcription = transcriptions.get(fileId);
+  
+  if (Date.now() > transcription.expiresAt) {
+    transcriptions.delete(fileId);
+    return res.status(404).json({ error: 'Transcrição expirada' });
+  }
+  
+  return res.json({
+    videoTitle: transcription.videoTitle,
+    channel: transcription.channel,
+    transcription: transcription.text
+  });
+});

@@ -9,7 +9,6 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const axios = require('axios');
-const cheerio = require('cheerio'); // Biblioteca para scraping
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,28 +16,6 @@ const PORT = process.env.PORT || 3000;
 // Função para validar URL do YouTube
 function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
-}
-
-// Função para buscar o número de inscritos diretamente na página do vídeo
-async function fetchSubscriberCountFromVideoPage(videoUrl) {
-  try {
-    console.log(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Buscando HTML da página: ${videoUrl}`);
-    const response = await axios.get(videoUrl);
-    const $ = cheerio.load(response.data);
-    // Utiliza o seletor direto para pegar o conteúdo dentro do elemento com id owner-sub-count
-    const subText = $('#owner-sub-count').text();
-    console.log(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Texto obtido de #owner-sub-count: "${subText}"`);
-    const match = subText.match(/(\d[\d,.]*)/);
-    if (match) {
-      const count = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
-      console.log(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Número de inscritos extraído: ${count}`);
-      return count;
-    }
-    return 0;
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] fetchSubscriberCountFromVideoPage - Erro:`, error.message);
-    return 0;
-  }
 }
 
 // Pasta para armazenar os arquivos temporários
@@ -201,7 +178,7 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
-// Novo Endpoint /stats para buscar estatísticas do vídeo, com scraping para inscritos
+// Novo Endpoint /stats para buscar estatísticas do vídeo usando informações do yt-dlp
 app.post('/stats', async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] /stats - Requisição recebida para ${req.body.youtubeUrl}`);
@@ -215,7 +192,7 @@ app.post('/stats', async (req, res) => {
       return res.status(400).json({ error: 'URL do YouTube inválida' });
     }
     
-    // Obter metadados do vídeo
+    // Obter metadados do vídeo usando yt-dlp
     const info = await getVideoInfo(youtubeUrl);
     console.log(`[${new Date().toISOString()}] /stats - Metadados obtidos:`, info);
 
@@ -226,14 +203,9 @@ app.post('/stats', async (req, res) => {
       console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Obter número de inscritos: primeiro via metadados, se não, tenta scraping usando a URL do vídeo
+    // Usar o que o yt-dlp fornece para inscritos
     let subscriberCount = info.channel_subscribers || 0;
-    console.log(`[${new Date().toISOString()}] /stats - channel_subscribers inicial: ${subscriberCount}`);
-    if (!subscriberCount) {
-      console.log(`[${new Date().toISOString()}] /stats - Tentando extrair inscritos da página do vídeo: ${youtubeUrl}`);
-      subscriberCount = await fetchSubscriberCountFromVideoPage(youtubeUrl);
-      console.log(`[${new Date().toISOString()}] /stats - Subscriber count extraído via scraping: ${subscriberCount}`);
-    }
+    console.log(`[${new Date().toISOString()}] /stats - Subscriber count (via yt-dlp): ${subscriberCount}`);
     
     const stats = {
       videoTitle: info.title || 'Unknown',

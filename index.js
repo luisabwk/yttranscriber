@@ -204,7 +204,7 @@ app.post('/stats', async (req, res) => {
       console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Obter número de inscritos via yt-dlp ou scraping adicional
+    // Obter número de inscritos
     let subscriberCount = info.channel_subscribers || 0;
     console.log(`[${new Date().toISOString()}] /stats - channel_subscribers inicial: ${subscriberCount}`);
     if (!subscriberCount && info.uploader_url) {
@@ -212,8 +212,9 @@ app.post('/stats', async (req, res) => {
         console.log(`[${new Date().toISOString()}] /stats - Fazendo scraping na URL do canal: ${info.uploader_url}`);
         const channelResponse = await axios.get(info.uploader_url);
         const $ = cheerio.load(channelResponse.data);
-        const subText = $('#owner-sub-count').text();
-        console.log(`[${new Date().toISOString()}] /stats - Texto obtido de #owner-sub-count: "${subText}"`);
+        // Usando o seletor com a classe para garantir que estamos buscando dentro do ytd-video-owner-renderer
+        const subText = $('ytd-video-owner-renderer #owner-sub-count').text();
+        console.log(`[${new Date().toISOString()}] /stats - Texto obtido de "ytd-video-owner-renderer #owner-sub-count": "${subText}"`);
         const match = subText.match(/(\d[\d,.]*)/);
         if (match) {
           subscriberCount = parseInt(match[1].replace(/[^0-9]/g, ''), 10);

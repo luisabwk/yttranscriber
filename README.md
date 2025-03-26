@@ -1,36 +1,27 @@
-# yttranscriber
+# YouTube Transcriber API
 
-Uma API robusta e eficiente para baixar vídeos do YouTube, converter para MP3 e realizar a transcrição automática com detecção do idioma do vídeo. A transcrição é entregue em formato JSON contendo o título do vídeo, o nome do canal e o texto da transcrição.
+Uma API robusta e eficiente para baixar vídeos do YouTube, extrair o áudio em formato MP3 e obter estatísticas detalhadas, incluindo o número de inscritos, utilizando múltiplas abordagens de fallback.
 
 ![YouTube to MP3](https://img.shields.io/badge/YouTube-MP3-red)
 ![Node.js](https://img.shields.io/badge/Node.js-14%2B-green)
 ![Express](https://img.shields.io/badge/Express-4.x-blue)
 
----
-
 ## ✨ Características
 
-- ⬇️ Download de vídeos do YouTube com múltiplas abordagens de fallback (proxy residencial, Invidious, YouTube Music, Piped.video)
-- 🎵 Conversão para MP3 de alta qualidade
-- 🔗 URLs temporárias para download dos arquivos convertidos
-- ⏱️ Expiração automática dos arquivos e transcrições (1 hora)
-- 🔄 Transcrição automática do áudio com detecção do idioma do vídeo
-- 📦 Transcrição entregue em JSON com os campos:
-  - `videoTitle`: título do vídeo
-  - `channel`: nome do canal do vídeo
-  - `transcription`: texto da transcrição
-
----
+- **Download de Vídeos com Fallback:** Utiliza várias abordagens para contornar restrições anti-bot do YouTube, incluindo proxy residencial e front-ends alternativos.
+- **Conversão para MP3:** Extração e conversão de áudio com alta qualidade usando FFmpeg.
+- **Estatísticas Detalhadas:** Retorna informações do vídeo, como título, descrição, views, likes, dislikes, comentários e data de publicação.
+- **Contagem de Inscritos Precisa:** Extração do número de inscritos do canal usando Puppeteer para interpretar valores abreviados (ex.: "1.46M" é convertido para 1.460.000).
+- **Nome do Canal:** O nome do canal é incluído no JSON de resultado.
+- **Transcrição (Opcional):** Suporte à transcrição do áudio via Assembly AI.
 
 ## 📋 Pré-requisitos
 
 - Node.js (versão 14 ou superior)
 - npm ou yarn
 - FFmpeg instalado no sistema
-- Python 3 e pip (para instalação do yt-dlp)
-- Variáveis de ambiente configuradas (por exemplo, as credenciais do proxy residencial e chave da API do Assembly AI)
-
----
+- Python 3 e pip (para yt-dlp)
+- Puppeteer (instalado via npm)
 
 ## 🔧 Instalação
 
@@ -43,55 +34,57 @@ cd yttranscriber
 
 ### 2. Instale as dependências
 
-Instale as dependências do Node.js (observe que agora utilizamos também as bibliotecas _dotenv_ e _axios_):
+Instale as dependências do Node.js:
 
 ```bash
 npm install
 ```
 
-Para instalar as dependências do Python e o FFmpeg, siga as instruções abaixo (em sistemas baseados em Debian/Ubuntu):
+Instale o yt-dlp (se ainda não estiver instalado):
 
 ```bash
-sudo apt update
-sudo apt install -y ffmpeg python3 python3-pip
 pip3 install --upgrade yt-dlp
 ```
 
-### 3. Configure o ambiente
+Certifique-se de ter o FFmpeg instalado:
 
-Crie um arquivo `.env` na raiz do projeto e defina as variáveis necessárias, por exemplo:
+```bash
+# Para Ubuntu/Debian:
+sudo apt update
+sudo apt install -y ffmpeg
+```
 
-```env
+### 3. Configurar variáveis de ambiente
+
+Crie um arquivo `.env` na raiz do projeto para definir suas variáveis de ambiente, por exemplo:
+
+```dotenv
 PORT=3000
+ASSEMBLY_API_KEY=YOUR_ASSEMBLYAI_API_KEY
+ENABLE_TRANSCRIPTION=true
 IPROYAL_USERNAME=seu_usuario
 IPROYAL_PASSWORD=sua_senha
-ASSEMBLY_API_KEY=sua_chave_da_api
-ENABLE_TRANSCRIPTION=true
 ```
 
 ### 4. Inicie o servidor
-
-Você pode iniciar o servidor diretamente ou utilizando o PM2 para gerenciamento em segundo plano:
 
 ```bash
 # Diretamente:
 node index.js
 
-# Com PM2:
+# Ou com PM2 para rodar em segundo plano:
 pm2 start index.js --name yt2mp3
 ```
 
-Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa porta definindo a variável de ambiente `PORT`.
-
----
+O servidor iniciará na porta configurada (por padrão, 3000).
 
 ## 📝 Como Usar
 
-### Converter um Vídeo do YouTube para MP3 e Transcrição
+### Converter um Vídeo para MP3
 
 **Endpoint:** `POST /convert`
 
-**Corpo da Requisição (JSON):**
+**Corpo da requisição (JSON):**
 
 ```json
 {
@@ -100,14 +93,12 @@ Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa po
 }
 ```
 
-- Se o campo `transcribe` for `true` e a transcrição estiver habilitada, a API realizará a transcrição automaticamente e retornará uma URL para acessar a transcrição.
-
-**Resposta de Sucesso:**
+**Resposta de sucesso:**
 
 ```json
 {
   "success": true,
-  "message": "Tarefa de download iniciada. Transcrição será processada automaticamente após o download.",
+  "message": "Tarefa de download iniciada",
   "taskId": "123e4567-e89b-12d3-a456-426614174000",
   "statusUrl": "/status/123e4567-e89b-12d3-a456-426614174000",
   "downloadUrl": "/download/123e4567-e89b-12d3-a456-426614174000",
@@ -118,33 +109,47 @@ Por padrão, o servidor será iniciado na porta 3000. Você pode alterar essa po
 }
 ```
 
+### Obter Estatísticas do Vídeo
+
+**Endpoint:** `POST /stats`
+
+**Corpo da requisição (JSON):**
+
+```json
+{
+  "youtubeUrl": "https://www.youtube.com/watch?v=exemplo"
+}
+```
+
+**Resposta de sucesso:**
+
+```json
+{
+  "videoTitle": "Título do Vídeo",
+  "channel": "Nome do Canal",
+  "description": "Descrição do vídeo...",
+  "views": 123456,
+  "likes": 7890,
+  "dislikes": 123,
+  "commentCount": 456,
+  "subscriberCount": 1460000,
+  "uploadDate": "2025-03-25"
+}
+```
+
+A contagem de inscritos é obtida com Puppeteer, que interpreta corretamente valores como "1.46M subscribers" para 1.460.000.
+
 ### Baixar o Arquivo MP3
 
 **Endpoint:** `GET /download/:fileId`
 
-Utilize a URL fornecida na resposta anterior para baixar o arquivo MP3.
-
-### Obter a Transcrição
-
-**Endpoint:** `GET /transcription/:fileId`
-
-A transcrição será retornada em formato JSON com a seguinte estrutura:
-
-```json
-{
-  "videoTitle": "Título do vídeo",
-  "channel": "Nome do canal",
-  "transcription": "Texto da transcrição"
-}
-```
+Use a URL fornecida na resposta do endpoint `/convert` para baixar o arquivo MP3.
 
 ### Verificar o Status da Tarefa
 
 **Endpoint:** `GET /status/:taskId`
 
-Utilize este endpoint para verificar o status da tarefa de download e transcrição.
-
----
+Use esse endpoint para verificar o progresso ou obter a URL de download após a conclusão.
 
 ## 📊 Exemplo de Uso com Node.js
 
@@ -152,14 +157,17 @@ Utilize este endpoint para verificar o status da tarefa de download e transcriç
 const axios = require('axios');
 const fs = require('fs');
 
+// URL base da API
 const API_URL = 'http://localhost:3000';
 
 async function convertAndDownload(youtubeUrl, outputPath) {
-  // Solicitar a conversão
-  const conversion = await axios.post(`${API_URL}/convert`, { youtubeUrl, transcribe: true });
+  // Solicita a conversão
+  const conversion = await axios.post(`${API_URL}/convert`, { youtubeUrl });
   
-  // Esperar alguns instantes e verificar o status se necessário
-  // (aqui o exemplo baixa o arquivo diretamente após a conclusão da tarefa)
+  // Verifica o status e aguarda a conclusão (pode ser implementado com polling)
+  console.log('Task ID:', conversion.data.taskId);
+  
+  // Baixa o arquivo (assumindo que o arquivo já esteja disponível)
   const response = await axios({
     method: 'GET',
     url: `${API_URL}${conversion.data.downloadUrl}`,
@@ -175,60 +183,29 @@ async function convertAndDownload(youtubeUrl, outputPath) {
   });
 }
 
-// Exemplo de uso:
 convertAndDownload('https://www.youtube.com/watch?v=exemplo', './musica.mp3')
   .then(() => console.log('Download completo!'))
   .catch(console.error);
 ```
 
----
-
-## 📁 Estrutura do Projeto
+## 📚 Estrutura do Projeto
 
 ```
 yttranscriber/
-├── index.js          # Arquivo principal da API
-├── package.json      # Dependências e scripts
-├── README.md         # Documentação do projeto
-└── temp/             # Diretório para armazenamento temporário dos arquivos
+├── index.js           # Arquivo principal da API
+├── package.json       # Dependências e scripts
+├── README.md          # Documentação do projeto
+├── setup.sh           # Script de configuração (opcional)
+└── temp/              # Diretório para arquivos temporários (criado automaticamente)
 ```
 
----
+## 🔄 Sistema de Fallback
 
-## 🔄 Sistema de Fallback e Transcrição
+A API utiliza múltiplas abordagens para garantir o download dos vídeos, incluindo:
+- **Proxy Residencial iProyal**
+- **Front-ends Alternativos (Invidious, YouTube Music, Piped.video)**
+- **Fallback via yt-dlp com configurações avançadas**
 
-Esta API utiliza múltiplas abordagens para garantir o download dos vídeos mesmo em cenários com restrições automatizadas (uso de proxy residencial, Invidious, YouTube Music e Piped.video).
+## ⚠️ Aviso Legal
 
-Além disso, se a transcrição estiver habilitada, o áudio é enviado para o Assembly AI e a transcrição é processada automaticamente. A transcrição é entregue no idioma detectado do vídeo e a resposta JSON inclui:
-- **videoTitle:** Título do vídeo
-- **channel:** Nome do canal
-- **transcription:** Texto da transcrição
-
----
-
-## ⚠️ Solução de Problemas
-
-- **Erro "FFmpeg não encontrado":**  
-  Certifique-se de que o FFmpeg está instalado corretamente. Execute:
-  
-  ```bash
-  ffmpeg -version
-  ```
-
-- **Problemas de Conectividade com o Proxy:**  
-  Verifique as credenciais e a conexão com o proxy residencial configurado no arquivo `.env`.
-
-- **Erro de Transcrição:**  
-  Confirme que a chave da API do Assembly AI está correta e que a transcrição está habilitada via variável de ambiente `ENABLE_TRANSCRIPTION`.
-
----
-
-## 🔒 Aviso Legal
-
-Esta API é fornecida apenas para fins educacionais. O download de conteúdo protegido por direitos autorais sem a devida autorização pode violar as leis de direitos autorais. Utilize esta ferramenta com responsabilidade e sempre em conformidade com as políticas e termos de serviço do YouTube.
-
----
-
-## 📄 Licença
-
-Este projeto está licenciado sob a [Licença MIT](LICENSE).
+Esta API é fornecida para fins educacionais. O download de conteúdo protegido por direitos autorais sem a devida permissão pode violar leis de direitos autorais. Utilize a API de forma responsável e em conformidade com as leis aplicáveis.

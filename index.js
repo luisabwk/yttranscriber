@@ -1,4 +1,4 @@
-// youtube-to-mp3-api/index.js
+// yttranscriber/index.js
 require('dotenv').config(); // Carregar variáveis do arquivo .env
 
 const express = require('express');
@@ -9,6 +9,7 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { spawn } = require('child_process');
 const axios = require('axios');
+const puppeteer = require('puppeteer'); // Para obter dados renderizados via Puppeteer
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,50 @@ const PORT = process.env.PORT || 3000;
 // Função para validar URL do YouTube
 function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
+}
+
+// Função auxiliar para interpretar a contagem de inscritos com abreviações
+function parseSubscriberCount(text) {
+  // Regex para capturar o valor numérico e o sufixo opcional (m ou k)
+  const regex = /([\d.,]+)\s*([mk])?/i;
+  const match = text.match(regex);
+  if (match) {
+    const num = parseFloat(match[1].replace(',', '.'));
+    let multiplier = 1;
+    if (match[2]) {
+      const suffix = match[2].toLowerCase();
+      if (suffix === 'm') {
+        multiplier = 1000000;
+      } else if (suffix === 'k') {
+        multiplier = 1000;
+      }
+    }
+    return Math.round(num * multiplier);
+  }
+  return 0;
+}
+
+// Função para buscar o número de inscritos usando Puppeteer a partir da página do vídeo
+async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
+  let browser;
+  try {
+    console.log(`[${new Date().toISOString()}] Puppeteer - Iniciando navegador para ${videoUrl}`);
+    browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+    const page = await browser.newPage();
+    await page.goto(videoUrl, { waitUntil: 'networkidle2' });
+    // Aguarda que o seletor esteja presente (timeout de 15 segundos)
+    await page.waitForSelector('#owner-sub-count', { timeout: 15000 });
+    const subText = await page.$eval('#owner-sub-count', el => el.textContent);
+    console.log(`[${new Date().toISOString()}] Puppeteer - Texto obtido de #owner-sub-count: "${subText}"`);
+    const count = parseSubscriberCount(subText);
+    console.log(`[${new Date().toISOString()}] Puppeteer - Número de inscritos extraído: ${count}`);
+    return count;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Puppeteer - Erro ao extrair inscritos: ${error.message}`);
+    return 0;
+  } finally {
+    if (browser) await browser.close();
+  }
 }
 
 // Pasta para armazenar os arquivos temporários
@@ -178,11 +223,207 @@ app.get('/status/:taskId', (req, res) => {
   res.json(response);
 });
 
-// ----------------------------------------------------------------
-// Funções Auxiliares
-// ----------------------------------------------------------------
+// Novo Endpoint /stats para buscar estatísticas do vídeo
+// Utilizamos os metadados do yt-dlp para a maioria dos dados e, para o número de inscritos,
+// usamos o Puppeteer para extrair o conteúdo do seletor "#owner-sub-count" na página do vídeo.
+// Além disso, o nome do canal é incluído no JSON de resultado.
+app.post('/stats', async (req, res) => {
+  try {
+    console.log(`[${new Date().toISOString()}] /stats - Requisição recebida para ${req.body.youtubeUrl}`);
+    const { youtubeUrl } = req.body;
+    if (!youtubeUrl) {
+      console.log(`[${new Date().toISOString()}] /stats - URL do YouTube não fornecida`);
+      return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
+    }
+    if (!validateYouTubeUrl(youtubeUrl)) {
+      console.log(`[${new Date().toISOString()}] /stats - URL inválida: ${youtubeUrl}`);
+      return res.status(400).json({ error: 'URL do YouTube inválida' });
+    }
+    
+    // Obter metadados do vídeo usando yt-dlp
+    const info = await getVideoInfo(youtubeUrl);
+    console.log(`[${new Date().toISOString()}] /stats - Metadados obtidos:`, info);
 
+    // Formatar a data de publicação (assumindo formato YYYYMMDD)
+    let uploadDate = 'Unknown';
+    if (info.upload_date && info.upload_date.length === 8) {
+      uploadDate = `${info.upload_date.slice(0, 4)}-${info.upload_date.slice(4, 6)}-${info.upload_date.slice(6)}`;
+      console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
+    }
+    
+    // Obter o número de inscritos usando Puppeteer
+    const subscriberCount = await fetchChannelSubscribersWithPuppeteer(youtubeUrl);
+    console.log(`[${new Date().toISOString()}] /stats - Subscriber count (via Puppeteer): ${subscriberCount}`);
+    
+    // Obter o nome do canal
+    const channel = info.uploader || info.channel || 'Unknown';
+    
+    const stats = {
+      videoTitle: info.title || 'Unknown',
+      channel: channel,
+      description: info.description || 'No description',
+      views: info.view_count || 0,
+      likes: info.like_count || 0,
+      dislikes: info.dislike_count || 0,
+      commentCount: info.comment_count || 0,
+      subscriberCount: subscriberCount,
+      uploadDate: uploadDate
+    };
+    console.log(`[${new Date().toISOString()}] /stats - Dados finais:`, stats);
+    return res.json(stats);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] /stats - Erro ao buscar estatísticas:`, error);
+    return res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
+  }
+});
+
+// Rota /convert para processar a solicitação usando a fila
+app.post('/convert', async (req, res) => {
+  try {
+    const { youtubeUrl, transcribe } = req.body;
+    if (!youtubeUrl) {
+      return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
+    }
+    if (!validateYouTubeUrl(youtubeUrl)) {
+      return res.status(400).json({ error: 'URL do YouTube inválida' });
+    }
+    console.log(`[${new Date().toISOString()}] Processando URL: ${youtubeUrl}`);
+    const fileId = uuidv4();
+    const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
+    const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
+    const shouldTranscribe = (transcribe === true || transcribe === 'true') && ENABLE_TRANSCRIPTION;
+    let videoTitle = `YouTube Video - ${fileId}`;
+    let taskStatus = 'pending';
+    pendingTasks.set(fileId, {
+      status: taskStatus,
+      title: videoTitle,
+      channel: 'Unknown',
+      url: youtubeUrl,
+      created: Date.now(),
+      downloadUrl: `/download/${fileId}`,
+      transcriptionRequested: shouldTranscribe,
+      transcriptionStatus: shouldTranscribe ? 'pending' : null,
+      hasTranscription: false
+    });
+    try {
+      const videoInfo = await getVideoInfo(youtubeUrl);
+      videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
+      const channel = videoInfo.uploader || videoInfo.channel || 'Unknown';
+      if (pendingTasks.has(fileId)) {
+        const taskInfo = pendingTasks.get(fileId);
+        taskInfo.title = videoTitle;
+        taskInfo.channel = channel;
+        pendingTasks.set(fileId, taskInfo);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
+    }
+    enqueueJob(async () => {
+      try {
+        await downloadYouTubeAudio(youtubeUrl, videoPath);
+        const possiblePaths = [
+          videoPath,
+          videoPath.replace('.mp4', '.mp3'),
+          videoPath.replace('.mp4', '.m4a'),
+          videoPath.replace('.mp4', '.webm')
+        ];
+        let existingFile = null;
+        for (const p of possiblePaths) {
+          if (fs.existsSync(p)) {
+            existingFile = p;
+            break;
+          }
+        }
+        if (!existingFile) {
+          throw new Error('Arquivo baixado não encontrado. O download falhou.');
+        }
+        if (!existingFile.endsWith('.mp3')) {
+          await new Promise((resolve, reject) => {
+            ffmpeg(existingFile)
+              .outputOptions('-q:a', '0')
+              .saveToFile(audioPath)
+              .on('end', () => {
+                try {
+                  fs.unlinkSync(existingFile);
+                } catch (err) {
+                  console.error(`[${new Date().toISOString()}] Erro ao remover arquivo original:`, err);
+                }
+                resolve();
+              })
+              .on('error', reject);
+          });
+        } else {
+          fs.renameSync(existingFile, audioPath);
+        }
+        const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
+        tempFiles.set(fileId, {
+          path: audioPath,
+          filename: `${sanitizedTitle}.mp3`,
+          expiresAt: Date.now() + EXPIRATION_TIME
+        });
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'completed';
+          pendingTasks.set(fileId, taskInfo);
+        }
+        if (shouldTranscribe) {
+          console.log(`[${new Date().toISOString()}] Iniciando processo de transcrição para ${fileId}`);
+          transcribeAudio(audioPath, fileId).then(transcriptResult => {
+            console.log(`[${new Date().toISOString()}] Resultado da transcrição:`, transcriptResult.success ? 'Sucesso' : 'Falha');
+          }).catch(err => {
+            console.error(`[${new Date().toISOString()}] Erro ao iniciar transcrição:`, err);
+          });
+        }
+        setTimeout(() => {
+          if (tempFiles.has(fileId)) {
+            const fileInfo = tempFiles.get(fileId);
+            if (fs.existsSync(fileInfo.path)) {
+              fs.unlinkSync(fileInfo.path);
+            }
+            tempFiles.delete(fileId);
+          }
+          if (pendingTasks.has(fileId)) {
+            pendingTasks.delete(fileId);
+          }
+          if (transcriptions.has(fileId)) {
+            transcriptions.delete(fileId);
+          }
+        }, EXPIRATION_TIME);
+        console.log(`[${new Date().toISOString()}] Processamento concluído para ${fileId}`);
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] Erro no processamento:`, error);
+        if (pendingTasks.has(fileId)) {
+          const taskInfo = pendingTasks.get(fileId);
+          taskInfo.status = 'failed';
+          taskInfo.error = error.message;
+          pendingTasks.set(fileId, taskInfo);
+        }
+      }
+    });
+    const response = {
+      success: true,
+      message: 'Tarefa de download iniciada',
+      taskId: fileId,
+      statusUrl: `/status/${fileId}`,
+      downloadUrl: `/download/${fileId}`,
+      estimatedDuration: 'Alguns minutos, dependendo do tamanho do vídeo'
+    };
+    if (shouldTranscribe) {
+      response.transcriptionRequested = true;
+      response.transcriptionStatus = 'pending';
+      response.transcriptionUrl = `/transcription/${fileId}`;
+      response.message += '. Transcrição será processada automaticamente após o download.';
+    }
+    res.json(response);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro ao iniciar processo:`, error);
+    res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
+  }
+});
+
+// ----------------------------------------------------------------
 // Função para executar comandos do yt-dlp
+// ----------------------------------------------------------------
 function executeYtDlp(args) {
   return new Promise((resolve, reject) => {
     console.log(`[${new Date().toISOString()}] Executando yt-dlp com argumentos:`, args.join(' '));
@@ -215,7 +456,9 @@ function executeYtDlp(args) {
   });
 }
 
+// ----------------------------------------------------------------
 // Função avançada para baixar áudio do YouTube com múltiplas abordagens
+// ----------------------------------------------------------------
 async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   const outputTemplate = outputPath.replace(/\.\w+$/, '') + '.%(ext)s';
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
@@ -379,7 +622,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   }
 }
 
+// ----------------------------------------------------------------
 // Função para obter informações do vídeo
+// ----------------------------------------------------------------
 async function getVideoInfo(youtubeUrl) {
   try {
     console.log(`[${new Date().toISOString()}] Buscando informações do vídeo: ${youtubeUrl}`);
@@ -452,7 +697,9 @@ async function getVideoInfo(youtubeUrl) {
   }
 }
 
+// ----------------------------------------------------------------
 // Função para transcrever áudio usando Assembly AI
+// ----------------------------------------------------------------
 async function transcribeAudio(audioFilePath, fileId) {
   try {
     console.log(`[${new Date().toISOString()}] Iniciando transcrição para ${fileId}`);
@@ -557,152 +804,6 @@ async function transcribeAudio(audioFilePath, fileId) {
     };
   }
 }
-
-// ----------------------------------------------------------------
-// Rota /convert para processar a solicitação usando a fila
-// ----------------------------------------------------------------
-app.post('/convert', async (req, res) => {
-  try {
-    const { youtubeUrl, transcribe } = req.body;
-    if (!youtubeUrl) {
-      return res.status(400).json({ error: 'URL do YouTube é obrigatória' });
-    }
-    if (!validateYouTubeUrl(youtubeUrl)) {
-      return res.status(400).json({ error: 'URL do YouTube inválida' });
-    }
-    console.log(`[${new Date().toISOString()}] Processando URL: ${youtubeUrl}`);
-    const fileId = uuidv4();
-    const videoPath = path.join(TEMP_DIR, `${fileId}.mp4`);
-    const audioPath = path.join(TEMP_DIR, `${fileId}.mp3`);
-    const shouldTranscribe = (transcribe === true || transcribe === 'true') && ENABLE_TRANSCRIPTION;
-    let videoTitle = `YouTube Video - ${fileId}`;
-    let taskStatus = 'pending';
-    pendingTasks.set(fileId, {
-      status: taskStatus,
-      title: videoTitle,
-      channel: 'Unknown',
-      url: youtubeUrl,
-      created: Date.now(),
-      downloadUrl: `/download/${fileId}`,
-      transcriptionRequested: shouldTranscribe,
-      transcriptionStatus: shouldTranscribe ? 'pending' : null,
-      hasTranscription: false
-    });
-    try {
-      const videoInfo = await getVideoInfo(youtubeUrl);
-      videoTitle = videoInfo.title || `YouTube Video - ${fileId}`;
-      const channel = videoInfo.uploader || videoInfo.channel || 'Unknown';
-      if (pendingTasks.has(fileId)) {
-        const taskInfo = pendingTasks.get(fileId);
-        taskInfo.title = videoTitle;
-        taskInfo.channel = channel;
-        pendingTasks.set(fileId, taskInfo);
-      }
-    } catch (error) {
-      console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
-    }
-    enqueueJob(async () => {
-      try {
-        await downloadYouTubeAudio(youtubeUrl, videoPath);
-        const possiblePaths = [
-          videoPath,
-          videoPath.replace('.mp4', '.mp3'),
-          videoPath.replace('.mp4', '.m4a'),
-          videoPath.replace('.mp4', '.webm')
-        ];
-        let existingFile = null;
-        for (const p of possiblePaths) {
-          if (fs.existsSync(p)) {
-            existingFile = p;
-            break;
-          }
-        }
-        if (!existingFile) {
-          throw new Error('Arquivo baixado não encontrado. O download falhou.');
-        }
-        if (!existingFile.endsWith('.mp3')) {
-          await new Promise((resolve, reject) => {
-            ffmpeg(existingFile)
-              .outputOptions('-q:a', '0')
-              .saveToFile(audioPath)
-              .on('end', () => {
-                try {
-                  fs.unlinkSync(existingFile);
-                } catch (err) {
-                  console.error(`[${new Date().toISOString()}] Erro ao remover arquivo original:`, err);
-                }
-                resolve();
-              })
-              .on('error', reject);
-          });
-        } else {
-          fs.renameSync(existingFile, audioPath);
-        }
-        const sanitizedTitle = videoTitle.replace(/[^\w\s]/gi, '');
-        tempFiles.set(fileId, {
-          path: audioPath,
-          filename: `${sanitizedTitle}.mp3`,
-          expiresAt: Date.now() + EXPIRATION_TIME
-        });
-        if (pendingTasks.has(fileId)) {
-          const taskInfo = pendingTasks.get(fileId);
-          taskInfo.status = 'completed';
-          pendingTasks.set(fileId, taskInfo);
-        }
-        if (shouldTranscribe) {
-          console.log(`[${new Date().toISOString()}] Iniciando processo de transcrição para ${fileId}`);
-          transcribeAudio(audioPath, fileId).then(transcriptResult => {
-            console.log(`[${new Date().toISOString()}] Resultado da transcrição:`, transcriptResult.success ? 'Sucesso' : 'Falha');
-          }).catch(err => {
-            console.error(`[${new Date().toISOString()}] Erro ao iniciar transcrição:`, err);
-          });
-        }
-        setTimeout(() => {
-          if (tempFiles.has(fileId)) {
-            const fileInfo = tempFiles.get(fileId);
-            if (fs.existsSync(fileInfo.path)) {
-              fs.unlinkSync(fileInfo.path);
-            }
-            tempFiles.delete(fileId);
-          }
-          if (pendingTasks.has(fileId)) {
-            pendingTasks.delete(fileId);
-          }
-          if (transcriptions.has(fileId)) {
-            transcriptions.delete(fileId);
-          }
-        }, EXPIRATION_TIME);
-        console.log(`[${new Date().toISOString()}] Processamento concluído para ${fileId}`);
-      } catch (error) {
-        console.error(`[${new Date().toISOString()}] Erro no processamento:`, error);
-        if (pendingTasks.has(fileId)) {
-          const taskInfo = pendingTasks.get(fileId);
-          taskInfo.status = 'failed';
-          taskInfo.error = error.message;
-          pendingTasks.set(fileId, taskInfo);
-        }
-      }
-    });
-    const response = {
-      success: true,
-      message: 'Tarefa de download iniciada',
-      taskId: fileId,
-      statusUrl: `/status/${fileId}`,
-      downloadUrl: `/download/${fileId}`,
-      estimatedDuration: 'Alguns minutos, dependendo do tamanho do vídeo'
-    };
-    if (shouldTranscribe) {
-      response.transcriptionRequested = true;
-      response.transcriptionStatus = 'pending';
-      response.transcriptionUrl = `/transcription/${fileId}`;
-      response.message += '. Transcrição será processada automaticamente após o download.';
-    }
-    res.json(response);
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Erro ao iniciar processo:`, error);
-    res.status(500).json({ error: 'Erro interno do servidor', details: error.message });
-  }
-});
 
 // ----------------------------------------------------------------
 // Iniciar o servidor

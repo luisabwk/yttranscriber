@@ -224,9 +224,9 @@ app.get('/status/:taskId', (req, res) => {
 });
 
 // Novo Endpoint /stats para buscar estatísticas do vídeo
-// Aqui usamos os metadados do yt-dlp para a maioria dos dados e, para o número de inscritos,
-// usamos o Puppeteer para extrair o conteúdo do seletor "#owner-sub-count" na página do vídeo,
-// e a função parseSubscriberCount para interpretar valores como "1.46M".
+// Utilizamos os metadados do yt-dlp para a maioria dos dados e, para o número de inscritos,
+// usamos o Puppeteer para extrair o conteúdo do seletor "#owner-sub-count" na página do vídeo.
+// Além disso, o nome do canal é incluído no JSON de resultado.
 app.post('/stats', async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] /stats - Requisição recebida para ${req.body.youtubeUrl}`);
@@ -251,12 +251,16 @@ app.post('/stats', async (req, res) => {
       console.log(`[${new Date().toISOString()}] /stats - Data de publicação: ${uploadDate}`);
     }
     
-    // Obter o número de inscritos usando Puppeteer e converter valores abreviados corretamente
+    // Obter o número de inscritos usando Puppeteer
     const subscriberCount = await fetchChannelSubscribersWithPuppeteer(youtubeUrl);
     console.log(`[${new Date().toISOString()}] /stats - Subscriber count (via Puppeteer): ${subscriberCount}`);
     
+    // Obter o nome do canal
+    const channel = info.uploader || info.channel || 'Unknown';
+    
     const stats = {
       videoTitle: info.title || 'Unknown',
+      channel: channel,
       description: info.description || 'No description',
       views: info.view_count || 0,
       likes: info.like_count || 0,
@@ -418,10 +422,8 @@ app.post('/convert', async (req, res) => {
 });
 
 // ----------------------------------------------------------------
-// Funções Auxiliares
-// ----------------------------------------------------------------
-
 // Função para executar comandos do yt-dlp
+// ----------------------------------------------------------------
 function executeYtDlp(args) {
   return new Promise((resolve, reject) => {
     console.log(`[${new Date().toISOString()}] Executando yt-dlp com argumentos:`, args.join(' '));
@@ -454,7 +456,9 @@ function executeYtDlp(args) {
   });
 }
 
+// ----------------------------------------------------------------
 // Função avançada para baixar áudio do YouTube com múltiplas abordagens
+// ----------------------------------------------------------------
 async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   const outputTemplate = outputPath.replace(/\.\w+$/, '') + '.%(ext)s';
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);

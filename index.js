@@ -19,6 +19,25 @@ function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
 }
 
+// Função auxiliar para interpretar a contagem de inscritos com abreviações
+function parseSubscriberCount(text) {
+  text = text.trim().toLowerCase();
+  let multiplier = 1;
+  // Se conter "mi" ou "milhões", multiplica por 1.000.000
+  if (text.includes('mi') || text.includes('milhão')) {
+    multiplier = 1000000;
+    text = text.replace(/mi|milhões?|milhão/gi, '');
+  } else if (text.includes('k') || text.includes('mil')) {
+    // Se contiver "k" ou "mil", multiplica por 1.000
+    multiplier = 1000;
+    text = text.replace(/k|mil/gi, '');
+  }
+  // Substituir vírgula por ponto para converter corretamente o valor decimal
+  text = text.replace(',', '.');
+  const value = parseFloat(text);
+  return isNaN(value) ? 0 : Math.round(value * multiplier);
+}
+
 // Função para buscar o número de inscritos usando Puppeteer a partir da página do vídeo
 async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
   let browser;
@@ -31,13 +50,9 @@ async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
     await page.waitForSelector('#owner-sub-count', { timeout: 15000 });
     const subText = await page.$eval('#owner-sub-count', el => el.textContent);
     console.log(`[${new Date().toISOString()}] Puppeteer - Texto obtido de #owner-sub-count: "${subText}"`);
-    const match = subText.match(/(\d[\d,.]*)/);
-    if (match) {
-      const count = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
-      console.log(`[${new Date().toISOString()}] Puppeteer - Número de inscritos extraído: ${count}`);
-      return count;
-    }
-    return 0;
+    const count = parseSubscriberCount(subText);
+    console.log(`[${new Date().toISOString()}] Puppeteer - Número de inscritos extraído: ${count}`);
+    return count;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Puppeteer - Erro ao extrair inscritos: ${error.message}`);
     return 0;
@@ -207,7 +222,7 @@ app.get('/status/:taskId', (req, res) => {
 });
 
 // Novo Endpoint /stats para buscar estatísticas do vídeo
-// Aqui usamos os metadados do yt-dlp para a maioria dos dados e, para o número de inscritos,
+// Usamos os metadados do yt-dlp para a maioria dos dados e, para o número de inscritos,
 // usamos o Puppeteer para extrair o conteúdo do seletor "#owner-sub-count" na página do vídeo.
 app.post('/stats', async (req, res) => {
   try {

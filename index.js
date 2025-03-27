@@ -69,7 +69,7 @@ const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION === 'true' || fals
 // ----------------------------------------------------------------
 const conversionQueue = [];
 let activeJobs = 0;
-const MAX_CONCURRENT_JOBS = 1; // For droplet with 1 vCPU
+const MAX_CONCURRENT_JOBS = 2; // For droplet with 1 vCPU
 
 function enqueueJob(job) {
   conversionQueue.push(job);

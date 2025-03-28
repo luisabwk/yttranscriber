@@ -31,12 +31,33 @@ async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
     await page.waitForSelector('#owner-sub-count', { timeout: 15000 });
     const subText = await page.$eval('#owner-sub-count', el => el.textContent);
     console.log(`[${new Date().toISOString()}] Puppeteer - Text obtained from #owner-sub-count: "${subText}"`);
-    const match = subText.match(/(\d[\d,.]*)/);
+    
+    // Parse subscriber count with various suffixes
+    // Handles: K, M, B and text-based suffixes like "mil", "mi", "bi"
+    const match = subText.match(/(\d+(?:[.,]\d+)?)\s*([KMB]|mil|mi|bi)?/i);
+    
     if (match) {
-      const count = parseInt(match[1].replace(/[^0-9]/g, ''), 10);
-      console.log(`[${new Date().toISOString()}] Puppeteer - Extracted subscriber count: ${count}`);
+      // Parse the base number, handling both dot and comma as decimal separators
+      let count = parseFloat(match[1].replace(',', '.'));
+      const suffix = match[2]?.toLowerCase();
+      
+      // Apply multiplier based on suffix
+      if (suffix === 'k' || suffix === 'mil') {
+        count *= 1000;
+      } else if (suffix === 'm' || suffix === 'mi') {
+        count *= 1000000;
+      } else if (suffix === 'b' || suffix === 'bi') {
+        count *= 1000000000;
+      }
+      
+      // Convert to integer
+      count = Math.round(count);
+      
+      console.log(`[${new Date().toISOString()}] Puppeteer - Extracted subscriber count: ${count} (from "${subText}")`);
       return count;
     }
+    
+    console.log(`[${new Date().toISOString()}] Puppeteer - Could not parse subscriber count from "${subText}"`);
     return 0;
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Puppeteer - Error extracting subscribers: ${error.message}`);

@@ -228,9 +228,6 @@ app.get('/status/:taskId', (req, res) => {
 });
 
 // New /stats Endpoint to fetch video statistics
-// We use yt-dlp metadata for most data and, for the subscriber count,
-// we use Puppeteer to extract the content of the "#owner-sub-count" selector from the video page.
-// Additionally, the channel name is included in the JSON result.
 app.post('/stats', async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] /stats - Request received for ${req.body.youtubeUrl}`);
@@ -464,7 +461,8 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Starting download for: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Output template: ${outputTemplate}`);
   
-  const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
+  // Use fixed proxy from environment variables
+  const proxyUrl = `http://${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
   const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
   
   let videoId = '';
@@ -477,9 +475,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
     throw new Error('Failed to extract video ID');
   }
   
-  // Approach 1: iProyal Residential Proxy
+  // Approach 1: Use Fixed Proxy
   try {
-    console.log(`[${new Date().toISOString()}] Attempting approach 1: iProyal Residential Proxy`);
+    console.log(`[${new Date().toISOString()}] Attempting approach 1: Fixed IP Proxy`);
     const proxyOptions = [
       '--extract-audio',
       '--audio-format', 'mp3',
@@ -495,10 +493,10 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
       youtubeUrl
     ];
     await executeYtDlp(proxyOptions);
-    console.log(`[${new Date().toISOString()}] Residential proxy approach successful!`);
+    console.log(`[${new Date().toISOString()}] Fixed proxy approach successful!`);
     return { success: true };
   } catch (errorProxy) {
-    console.log(`[${new Date().toISOString()}] Residential proxy approach failed: ${errorProxy.message}`);
+    console.log(`[${new Date().toISOString()}] Fixed proxy approach failed: ${errorProxy.message}`);
     // Approach 2: Invidious Instances
     try {
       console.log(`[${new Date().toISOString()}] Attempting approach 2: Invidious Proxy`);
@@ -637,10 +635,13 @@ async function getVideoInfo(youtubeUrl) {
     if (!videoId) {
       throw new Error('Failed to extract video ID');
     }
-    const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
+    
+    // Use fixed proxy from environment variables
+    const proxyUrl = `http://${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+    
     try {
-      console.log(`[${new Date().toISOString()}] Attempting to fetch information via residential proxy`);
+      console.log(`[${new Date().toISOString()}] Attempting to fetch information via fixed proxy`);
       const info = await youtubedl(youtubeUrl, {
         dumpSingleJson: true,
         noWarnings: true,
@@ -653,7 +654,7 @@ async function getVideoInfo(youtubeUrl) {
       });
       return info;
     } catch (err) {
-      console.log(`[${new Date().toISOString()}] Failed to fetch information via residential proxy: ${err.message}`);
+      console.log(`[${new Date().toISOString()}] Failed to fetch information via fixed proxy: ${err.message}`);
       try {
         console.log(`[${new Date().toISOString()}] Attempting to fetch information via Invidious`);
         const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
@@ -684,6 +685,7 @@ async function getVideoInfo(youtubeUrl) {
             noPlaylist: true,
             skipDownload: true
           });
+          
           return info;
         } catch (err3) {
           console.log(`[${new Date().toISOString()}] All attempts to fetch information failed`);

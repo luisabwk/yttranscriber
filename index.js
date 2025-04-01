@@ -23,7 +23,414 @@ function validateYouTubeUrl(url) {
 async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
   let browser;
   try {
-    console.log(`[${new Date().toISOString()}] Puppeteer - Launching browser for ${videoUrl}`);
+    console.log(`[${new Date().toISOString()}] Puppeteer approach failed: ${puppeteerError.message}`);
+    // Continue with other approaches
+  }
+  
+  // Approach 1: Use Fixed Proxy
+  try {
+    console.log(`[${new Date().toISOString()}] Attempting approach 1: Fixed IP Proxy`);
+    const proxyOptions = [
+      '--extract-audio',
+      '--audio-format', 'mp3',
+      '--audio-quality', '0',
+      '--no-warnings',
+      '--proxy', proxyUrl,
+      '--no-check-certificate',
+      '--geo-bypass',
+      '--ignore-errors',
+      '--limit-rate', '500K',
+      '--user-agent', userAgent,
+      '-o', outputTemplate,
+      youtubeUrl
+    ];
+    await executeYtDlp(proxyOptions);
+    console.log(`[${new Date().toISOString()}] Fixed proxy approach successful!`);
+    return { success: true };
+  } catch (errorProxy) {
+    console.log(`[${new Date().toISOString()}] Fixed proxy approach failed: ${errorProxy.message}`);
+    // Approach 2: Invidious Instances
+    try {
+      console.log(`[${new Date().toISOString()}] Attempting approach 2: Invidious Proxy`);
+      const invidiousInstances = [
+        'yewtu.be',
+        'invidious.snopyta.org',
+        'vid.puffyan.us',
+        'invidious.kavin.rocks',
+        'invidious.namazso.eu',
+        'inv.riverside.rocks'
+      ];
+      for (const instance of invidiousInstances) {
+        try {
+          const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
+          console.log(`[${new Date().toISOString()}] All attempts to fetch information failed`);
+          throw err3;
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error fetching video information:`, error);
+    return { title: `YouTube Video - ${videoId || 'Unknown'}` };
+  }
+}
+
+// ----------------------------------------------------------------
+// Function to transcribe audio using Assembly AI
+// ----------------------------------------------------------------
+async function transcribeAudio(audioFilePath, fileId) {
+  try {
+    console.log(`[${new Date().toISOString()}] Starting transcription for ${fileId}`);
+    if (!ENABLE_TRANSCRIPTION || !ASSEMBLY_API_KEY || ASSEMBLY_API_KEY === 'YOUR_API_KEY_HERE') {
+      console.log(`[${new Date().toISOString()}] Transcription disabled or API key not configured`);
+      return {
+        success: false,
+        message: 'Transcription disabled or API key not configured'
+      };
+    }
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'uploading';
+      pendingTasks.set(fileId, taskInfo);
+    }
+    const audioFile = fs.readFileSync(audioFilePath);
+    const audioSize = fs.statSync(audioFilePath).size;
+    console.log(`[${new Date().toISOString()}] Audio file size: ${audioSize} bytes`);
+    const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': ASSEMBLY_API_KEY
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+    const audioUrl = uploadResponse.data.upload_url;
+    console.log(`[${new Date().toISOString()}] Audio successfully uploaded to Assembly AI: ${audioUrl}`);
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'processing';
+      pendingTasks.set(fileId, taskInfo);
+    }
+    const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
+      audio_url: audioUrl,
+      language_detection: true
+    }, {
+      headers: {
+        'Authorization': ASSEMBLY_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+    const transcriptId = transcriptResponse.data.id;
+    console.log(`[${new Date().toISOString()}] Transcription started with ID: ${transcriptId}`);
+    let transcriptResult;
+    let isCompleted = false;
+    while (!isCompleted) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const checkResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+        headers: {
+          'Authorization': ASSEMBLY_API_KEY
+        }
+      });
+      const status = checkResponse.data.status;
+      console.log(`[${new Date().toISOString()}] Transcription status: ${status}`);
+      if (status === 'completed') {
+        isCompleted = true;
+        transcriptResult = checkResponse.data;
+      } else if (status === 'error') {
+        throw new Error(`Transcription error: ${checkResponse.data.error}`);
+      }
+    }
+    const transcriptionText = transcriptResult.text;
+    const detectedLanguage = transcriptResult.language_code || 'Not detected';
+    const taskInfo = pendingTasks.get(fileId) || {};
+    const videoTitle = taskInfo.title || `YouTube Video - ${fileId}`;
+    const channel = taskInfo.channel || 'Unknown';
+    transcriptions.set(fileId, {
+      text: transcriptionText,
+      raw: transcriptResult,
+      language: detectedLanguage,
+      created: Date.now(),
+      expiresAt: Date.now() + EXPIRATION_TIME,
+      videoTitle,
+      channel
+    });
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'completed';
+      taskInfo.hasTranscription = true;
+      taskInfo.transcriptionUrl = `/transcription/${fileId}`;
+      taskInfo.detectedLanguage = detectedLanguage;
+      pendingTasks.set(fileId, taskInfo);
+    }
+    console.log(`[${new Date().toISOString()}] Transcription successfully completed for ${fileId} in language ${detectedLanguage}`);
+    return {
+      success: true,
+      transcription: transcriptionText,
+      language: detectedLanguage
+    };
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error in transcription:`, error.message);
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'failed';
+      taskInfo.transcriptionError = error.message;
+      pendingTasks.set(fileId, taskInfo);
+    }
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// ----------------------------------------------------------------
+// Start the server
+// ----------------------------------------------------------------
+app.listen(PORT, () => {
+  console.log(`[${new Date().toISOString()}] Server running on port ${PORT}`);
+});
+
+// Export app for testing
+module.exports = app; Using Invidious URL: ${invidiousUrl}`);
+          const invidiousOptions = [
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--no-warnings',
+            '--no-check-certificate',
+            '--geo-bypass',
+            '--ignore-errors',
+            '--proxy', proxyUrl,
+            '--limit-rate', '500K',
+            '--user-agent', userAgent,
+            '-o', outputTemplate,
+            invidiousUrl
+          ];
+          await executeYtDlp(invidiousOptions);
+          console.log(`[${new Date().toISOString()}] Download with ${instance} successful!`);
+          return { success: true };
+        } catch (err) {
+          console.log(`[${new Date().toISOString()}] Failed with ${instance}: ${err.message}`);
+        }
+      }
+      throw new Error('All Invidious instances failed');
+    } catch (error2) {
+      console.log(`[${new Date().toISOString()}] Approach 2 (Invidious) failed: ${error2.message}`);
+      // Approach 3: Advanced settings
+      try {
+        console.log(`[${new Date().toISOString()}] Attempting approach 3: Advanced settings`);
+        const advancedOptions = [
+          '--extract-audio',
+          '--audio-format', 'mp3',
+          '--audio-quality', '0',
+          '--no-warnings',
+          '--format', 'bestaudio[ext=m4a]/bestaudio/best',
+          '--no-check-certificate',
+          '--geo-bypass',
+          '--ignore-errors',
+          '--no-playlist',
+          '--proxy', proxyUrl,
+          '--limit-rate', '500K',
+          '--user-agent', userAgent,
+          '--extractor-args', 'youtube:skip_webpage=True',
+          '-o', outputTemplate,
+          youtubeUrl
+        ];
+        await executeYtDlp(advancedOptions);
+        console.log(`[${new Date().toISOString()}] Approach 3 successful!`);
+        return { success: true };
+      } catch (error3) {
+        console.log(`[${new Date().toISOString()}] Approach 3 failed: ${error3.message}`);
+        // Approach 4: YouTube Music
+        try {
+          console.log(`[${new Date().toISOString()}] Attempting approach 4: YouTube Music`);
+          const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
+          console.log(`[${new Date().toISOString()}] Using YouTube Music URL: ${ytMusicUrl}`);
+          const ytMusicOptions = [
+            '--extract-audio',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--no-warnings',
+            '--no-check-certificate',
+            '--geo-bypass',
+            '--ignore-errors',
+            '--no-playlist',
+            '--proxy', proxyUrl,
+            '--limit-rate', '500K',
+            '--user-agent', userAgent,
+            '-o', outputTemplate,
+            ytMusicUrl
+          ];
+          await executeYtDlp(ytMusicOptions);
+          console.log(`[${new Date().toISOString()}] Approach 4 successful!`);
+          return { success: true };
+        } catch (error4) {
+          console.log(`[${new Date().toISOString()}] Approach 4 failed: ${error4.message}`);
+          // Approach 5: Piped.video
+          try {
+            console.log(`[${new Date().toISOString()}] Approach 5 failed: ${error5.message}`);
+            throw new Error('All download approaches failed. YouTube is blocking automated access.');
+          }
+        }
+      }
+    }
+  }
+}
+
+// ----------------------------------------------------------------
+// Function to fetch video information
+// ----------------------------------------------------------------
+async function getVideoInfo(youtubeUrl) {
+  try {
+    console.log(`[${new Date().toISOString()}] Fetching video information for: ${youtubeUrl}`);
+    let videoId = '';
+    if (youtubeUrl.includes('youtube.com/watch?v=')) {
+      videoId = new URL(youtubeUrl).searchParams.get('v');
+    } else if (youtubeUrl.includes('youtu.be/')) {
+      videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
+    }
+    if (!videoId) {
+      throw new Error('Failed to extract video ID');
+    }
+    
+    // First try using Puppeteer to get video info
+    try {
+      console.log(`[${new Date().toISOString()}] Attempting to fetch information via Puppeteer`);
+      let browser;
+      try {
+        browser = await puppeteer.launch({
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-infobars',
+            `--proxy-server=${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`
+          ],
+          headless: true
+        });
+        
+        const page = await browser.newPage();
+        
+        // Configure proxy authentication
+        await page.authenticate({
+          username: process.env.PROXY_USERNAME,
+          password: process.env.PROXY_PASSWORD
+        });
+        
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36');
+        
+        await page.goto(youtubeUrl, { 
+          waitUntil: 'networkidle2',
+          timeout: 30000
+        });
+        
+        // Get video info from page
+        const videoInfo = await page.evaluate(() => {
+          if (typeof ytInitialPlayerResponse !== 'undefined') {
+            const data = ytInitialPlayerResponse;
+            const videoDetails = data.videoDetails || {};
+            const microformat = data.microformat?.playerMicroformatRenderer || {};
+            
+            return {
+              title: videoDetails.title || '',
+              description: videoDetails.shortDescription || '',
+              view_count: parseInt(videoDetails.viewCount || 0),
+              like_count: parseInt(data.videoPrimaryInfoRenderer?.videoActions?.menuRenderer?.topLevelButtons?.[0]?.toggleButtonRenderer?.defaultText?.simpleText?.replace(/\D/g, '') || 0),
+              channel: videoDetails.author || '',
+              uploader: videoDetails.author || '',
+              upload_date: microformat.uploadDate ? microformat.uploadDate.replace(/-/g, '') : ''
+            };
+          }
+          return null;
+        });
+        
+        if (videoInfo) {
+          console.log(`[${new Date().toISOString()}] Video info successfully extracted via Puppeteer`);
+          return videoInfo;
+        }
+      } catch (err) {
+        console.log(`[${new Date().toISOString()}] Error in Puppeteer info extraction: ${err.message}`);
+      } finally {
+        if (browser) await browser.close();
+      }
+    } catch (puppeteerError) {
+      console.log(`[${new Date().toISOString()}] Puppeteer approach for info failed: ${puppeteerError.message}`);
+    }
+    
+    // Use fixed proxy from environment variables
+    const proxyUrl = `http://${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
+    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36';
+    
+    try {
+      console.log(`[${new Date().toISOString()}] Attempting to fetch information via fixed proxy`);
+      const info = await youtubedl(youtubeUrl, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        noCallHome: true,
+        proxy: proxyUrl,
+        userAgent: userAgent,
+        noCheckCertificate: true,
+        geoBypass: true,
+        noPlaylist: true
+      });
+      return info;
+    } catch (err) {
+      console.log(`[${new Date().toISOString()}] Failed to fetch information via fixed proxy: ${err.message}`);
+      try {
+        console.log(`[${new Date().toISOString()}] Attempting to fetch information via Invidious`);
+        const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
+        const info = await youtubedl(invidiousUrl, {
+          dumpSingleJson: true,
+          noWarnings: true,
+          noCallHome: true,
+          proxy: proxyUrl,
+          userAgent: userAgent,
+          noCheckCertificate: true,
+          geoBypass: true,
+          noPlaylist: true
+        });
+        return info;
+      } catch (err2) {
+        console.log(`[${new Date().toISOString()}] Failed to fetch information via Invidious: ${err2.message}`);
+        try {
+          const info = await youtubedl(youtubeUrl, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            noCallHome: true,
+            preferFreeFormats: true,
+            youtubeSkipDashManifest: true,
+            proxy: proxyUrl,
+            userAgent: userAgent,
+            noCheckCertificate: true,
+            geoBypass: true,
+            noPlaylist: true,
+            skipDownload: true
+          });
+          
+          return info;
+        } catch (err3) {
+          console.log(`[${new Date().toISOString()}] Attempting approach 5: Piped.video`);
+            const pipedUrl = `https://piped.video/watch?v=${videoId}`;
+            console.log(`[${new Date().toISOString()}] Using Piped URL: ${pipedUrl}`);
+            const pipedOptions = [
+              '--extract-audio',
+              '--audio-format', 'mp3',
+              '--audio-quality', '0',
+              '--no-warnings',
+              '--no-check-certificate',
+              '--geo-bypass',
+              '--ignore-errors',
+              '--no-playlist',
+              '--proxy', proxyUrl,
+              '--limit-rate', '500K',
+              '--user-agent', userAgent,
+              '--force-ipv4',
+              '-o', outputTemplate,
+              pipedUrl
+            ];
+            await executeYtDlp(pipedOptions);
+            console.log(`[${new Date().toISOString()}] Approach 5 successful!`);
+            return { success: true };
+          } catch (error5) {
+            console.log(`[${new Date().toISOString()}] Puppeteer - Launching browser for ${videoUrl}`);
     browser = await puppeteer.launch({ args: ['--no-sandbox'] });
     const page = await browser.newPage();
     await page.goto(videoUrl, { waitUntil: 'networkidle2' });
@@ -64,6 +471,164 @@ async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
     return 0;
   } finally {
     if (browser) await browser.close();
+  }
+}
+
+// New function to get direct stream URL using Puppeteer
+async function getDirectStreamUrl(youtubeUrl) {
+  let browser;
+  try {
+    console.log(`[${new Date().toISOString()}] Puppeteer - Launching browser for stream extraction: ${youtubeUrl}`);
+    
+    // Launch browser with specific settings to avoid detection
+    browser = await puppeteer.launch({
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-infobars',
+        '--window-position=0,0',
+        '--ignore-certificate-errors',
+        '--ignore-certificate-errors-spki-list',
+        `--proxy-server=${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`
+      ],
+      headless: true
+    });
+    
+    const page = await browser.newPage();
+    
+    // Configure proxy authentication
+    await page.authenticate({
+      username: process.env.PROXY_USERNAME,
+      password: process.env.PROXY_PASSWORD
+    });
+    
+    // Configure browser fingerprint to appear more human
+    await page.setViewport({
+      width: 1920,
+      height: 1080,
+      deviceScaleFactor: 1,
+    });
+    
+    // Set more realistic user agent
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36');
+    
+    // Set additional headers for greater legitimacy
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1'
+    });
+    
+    // Enable JavaScript to process captchas and other challenges
+    await page.setJavaScriptEnabled(true);
+    
+    // Intercept requests to analyze media URLs
+    let videoUrl = null;
+    await page.setRequestInterception(true);
+    
+    page.on('request', request => {
+      request.continue();
+    });
+    
+    page.on('response', async response => {
+      const url = response.url();
+      // Detect audio stream URLs
+      if (url.includes('audioplayback') || 
+          (url.includes('videoplayback') && url.includes('mime=audio'))) {
+        console.log(`[${new Date().toISOString()}] Puppeteer - Found potential stream URL: ${url}`);
+        videoUrl = url;
+      }
+    });
+    
+    console.log(`[${new Date().toISOString()}] Puppeteer - Navigating to ${youtubeUrl}`);
+    
+    // Navigate to the page with longer timeout
+    await page.goto(youtubeUrl, { 
+      waitUntil: 'networkidle2',
+      timeout: 60000 
+    });
+    
+    console.log(`[${new Date().toISOString()}] Puppeteer - Page loaded, checking elements`);
+    
+    // Check for captcha verification and try to handle it
+    if (await page.$('iframe[src*="recaptcha"]') !== null) {
+      console.log(`[${new Date().toISOString()}] Puppeteer - ReCaptcha detected, waiting...`);
+      // Wait for possible expiration or auto-bypass (some captchas expire)
+      await page.waitForTimeout(5000);
+    }
+    
+    // Click the play button to activate video loading
+    try {
+      if (await page.$('.ytp-play-button') !== null) {
+        await page.click('.ytp-play-button');
+        console.log(`[${new Date().toISOString()}] Puppeteer - Play button clicked`);
+        // Wait for stream to load
+        await page.waitForTimeout(3000);
+      }
+    } catch (err) {
+      console.log(`[${new Date().toISOString()}] Puppeteer - Error clicking play: ${err.message}`);
+    }
+    
+    // If URL not found via interception, try extracting via YouTube's JavaScript
+    if (!videoUrl) {
+      try {
+        videoUrl = await page.evaluate(() => {
+          // Try extracting from YouTube player API
+          if (typeof ytplayer !== 'undefined' && ytplayer.config) {
+            const formats = ytplayer.config.args.adaptive_fmts || '';
+            const audioFormats = formats.split(',').filter(f => f.includes('audio'));
+            if (audioFormats.length > 0) {
+              return decodeURIComponent(audioFormats[0].split('&')[0].split('=')[1]);
+            }
+          }
+          return null;
+        });
+        
+        if (videoUrl) {
+          console.log(`[${new Date().toISOString()}] Puppeteer - Audio URL extracted via JavaScript: ${videoUrl}`);
+        }
+      } catch (err) {
+        console.log(`[${new Date().toISOString()}] Puppeteer - Error extracting via JavaScript: ${err.message}`);
+      }
+    }
+    
+    // If still not found, try alternative method
+    if (!videoUrl) {
+      try {
+        // Wait a bit longer and capture all network URLs
+        await page.waitForTimeout(5000);
+        const client = await page.target().createCDPSession();
+        await client.send('Network.enable');
+        const resources = await client.send('Network.getResponseBodyForInterception');
+        
+        for (const resource of resources) {
+          if (resource.url && resource.url.includes('videoplayback') && resource.url.includes('mime=audio')) {
+            videoUrl = resource.url;
+            break;
+          }
+        }
+      } catch (err) {
+        console.log(`[${new Date().toISOString()}] Puppeteer - Error in alternative method: ${err.message}`);
+      }
+    }
+    
+    if (videoUrl) {
+      console.log(`[${new Date().toISOString()}] Puppeteer - Stream URL found successfully`);
+      return { success: true, url: videoUrl };
+    } else {
+      console.log(`[${new Date().toISOString()}] Puppeteer - Could not extract stream URL`);
+      return { success: false, error: 'Could not find stream URL' };
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Puppeteer - Error getting stream URL:`, error);
+    return { success: false, error: error.message };
+  } finally {
+    if (browser) {
+      await browser.close();
+      console.log(`[${new Date().toISOString()}] Puppeteer - Browser closed`);
+    }
   }
 }
 
@@ -463,7 +1028,7 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   
   // Use fixed proxy from environment variables
   const proxyUrl = `http://${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
-  const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+  const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36';
   
   let videoId = '';
   if (youtubeUrl.includes('youtube.com/watch?v=')) {
@@ -475,344 +1040,65 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
     throw new Error('Failed to extract video ID');
   }
   
-  // Approach 1: Use Fixed Proxy
+  // New Approach 0: Puppeteer to bypass anti-bot checks
   try {
-    console.log(`[${new Date().toISOString()}] Attempting approach 1: Fixed IP Proxy`);
-    const proxyOptions = [
-      '--extract-audio',
-      '--audio-format', 'mp3',
-      '--audio-quality', '0',
-      '--no-warnings',
-      '--proxy', proxyUrl,
-      '--no-check-certificate',
-      '--geo-bypass',
-      '--ignore-errors',
-      '--limit-rate', '500K',
-      '--user-agent', userAgent,
-      '-o', outputTemplate,
-      youtubeUrl
-    ];
-    await executeYtDlp(proxyOptions);
-    console.log(`[${new Date().toISOString()}] Fixed proxy approach successful!`);
-    return { success: true };
-  } catch (errorProxy) {
-    console.log(`[${new Date().toISOString()}] Fixed proxy approach failed: ${errorProxy.message}`);
-    // Approach 2: Invidious Instances
-    try {
-      console.log(`[${new Date().toISOString()}] Attempting approach 2: Invidious Proxy`);
-      const invidiousInstances = [
-        'yewtu.be',
-        'invidious.snopyta.org',
-        'vid.puffyan.us',
-        'invidious.kavin.rocks',
-        'invidious.namazso.eu',
-        'inv.riverside.rocks'
-      ];
-      for (const instance of invidiousInstances) {
-        try {
-          const invidiousUrl = `https://${instance}/watch?v=${videoId}`;
-          console.log(`[${new Date().toISOString()}] Using Invidious URL: ${invidiousUrl}`);
-          const invidiousOptions = [
-            '--extract-audio',
-            '--audio-format', 'mp3',
-            '--audio-quality', '0',
-            '--no-warnings',
-            '--no-check-certificate',
-            '--geo-bypass',
-            '--ignore-errors',
-            '--proxy', proxyUrl,
-            '--limit-rate', '500K',
-            '--user-agent', userAgent,
-            '-o', outputTemplate,
-            invidiousUrl
-          ];
-          await executeYtDlp(invidiousOptions);
-          console.log(`[${new Date().toISOString()}] Download with ${instance} successful!`);
-          return { success: true };
-        } catch (err) {
-          console.log(`[${new Date().toISOString()}] Failed with ${instance}: ${err.message}`);
-        }
-      }
-      throw new Error('All Invidious instances failed');
-    } catch (error2) {
-      console.log(`[${new Date().toISOString()}] Approach 2 (Invidious) failed: ${error2.message}`);
-      // Approach 3: Advanced settings
-      try {
-        console.log(`[${new Date().toISOString()}] Attempting approach 3: Advanced settings`);
-        const advancedOptions = [
-          '--extract-audio',
-          '--audio-format', 'mp3',
-          '--audio-quality', '0',
-          '--no-warnings',
-          '--format', 'bestaudio[ext=m4a]/bestaudio/best',
-          '--no-check-certificate',
-          '--geo-bypass',
-          '--ignore-errors',
-          '--no-playlist',
-          '--proxy', proxyUrl,
-          '--limit-rate', '500K',
-          '--user-agent', userAgent,
-          '--extractor-args', 'youtube:skip_webpage=True',
-          '-o', outputTemplate,
-          youtubeUrl
-        ];
-        await executeYtDlp(advancedOptions);
-        console.log(`[${new Date().toISOString()}] Approach 3 successful!`);
-        return { success: true };
-      } catch (error3) {
-        console.log(`[${new Date().toISOString()}] Approach 3 failed: ${error3.message}`);
-        // Approach 4: YouTube Music
-        try {
-          console.log(`[${new Date().toISOString()}] Attempting approach 4: YouTube Music`);
-          const ytMusicUrl = youtubeUrl.replace('youtube.com', 'music.youtube.com');
-          console.log(`[${new Date().toISOString()}] Using YouTube Music URL: ${ytMusicUrl}`);
-          const ytMusicOptions = [
-            '--extract-audio',
-            '--audio-format', 'mp3',
-            '--audio-quality', '0',
-            '--no-warnings',
-            '--no-check-certificate',
-            '--geo-bypass',
-            '--ignore-errors',
-            '--no-playlist',
-            '--proxy', proxyUrl,
-            '--limit-rate', '500K',
-            '--user-agent', userAgent,
-            '-o', outputTemplate,
-            ytMusicUrl
-          ];
-          await executeYtDlp(ytMusicOptions);
-          console.log(`[${new Date().toISOString()}] Approach 4 successful!`);
-          return { success: true };
-        } catch (error4) {
-          console.log(`[${new Date().toISOString()}] Approach 4 failed: ${error4.message}`);
-          // Approach 5: Piped.video
-          try {
-            console.log(`[${new Date().toISOString()}] Attempting approach 5: Piped.video`);
-            const pipedUrl = `https://piped.video/watch?v=${videoId}`;
-            console.log(`[${new Date().toISOString()}] Using Piped URL: ${pipedUrl}`);
-            const pipedOptions = [
-              '--extract-audio',
-              '--audio-format', 'mp3',
-              '--audio-quality', '0',
-              '--no-warnings',
-              '--no-check-certificate',
-              '--geo-bypass',
-              '--ignore-errors',
-              '--no-playlist',
-              '--proxy', proxyUrl,
-              '--limit-rate', '500K',
-              '--user-agent', userAgent,
-              '--force-ipv4',
-              '-o', outputTemplate,
-              pipedUrl
-            ];
-            await executeYtDlp(pipedOptions);
-            console.log(`[${new Date().toISOString()}] Approach 5 successful!`);
-            return { success: true };
-          } catch (error5) {
-            console.log(`[${new Date().toISOString()}] Approach 5 failed: ${error5.message}`);
-            throw new Error('All download approaches failed. YouTube is blocking automated access.');
-          }
-        }
-      }
-    }
-  }
-}
-
-// ----------------------------------------------------------------
-// Function to fetch video information
-// ----------------------------------------------------------------
-async function getVideoInfo(youtubeUrl) {
-  try {
-    console.log(`[${new Date().toISOString()}] Fetching video information for: ${youtubeUrl}`);
-    let videoId = '';
-    if (youtubeUrl.includes('youtube.com/watch?v=')) {
-      videoId = new URL(youtubeUrl).searchParams.get('v');
-    } else if (youtubeUrl.includes('youtu.be/')) {
-      videoId = youtubeUrl.split('youtu.be/')[1].split('?')[0];
-    }
-    if (!videoId) {
-      throw new Error('Failed to extract video ID');
-    }
+    console.log(`[${new Date().toISOString()}] Attempting approach 0: Puppeteer direct extraction`);
     
-    // Use fixed proxy from environment variables
-    const proxyUrl = `http://${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
-    const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+    const streamResult = await getDirectStreamUrl(youtubeUrl);
     
-    try {
-      console.log(`[${new Date().toISOString()}] Attempting to fetch information via fixed proxy`);
-      const info = await youtubedl(youtubeUrl, {
-        dumpSingleJson: true,
-        noWarnings: true,
-        noCallHome: true,
-        proxy: proxyUrl,
-        userAgent: userAgent,
-        noCheckCertificate: true,
-        geoBypass: true,
-        noPlaylist: true
-      });
-      return info;
-    } catch (err) {
-      console.log(`[${new Date().toISOString()}] Failed to fetch information via fixed proxy: ${err.message}`);
-      try {
-        console.log(`[${new Date().toISOString()}] Attempting to fetch information via Invidious`);
-        const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
-        const info = await youtubedl(invidiousUrl, {
-          dumpSingleJson: true,
-          noWarnings: true,
-          noCallHome: true,
-          proxy: proxyUrl,
-          userAgent: userAgent,
-          noCheckCertificate: true,
-          geoBypass: true,
-          noPlaylist: true
-        });
-        return info;
-      } catch (err2) {
-        console.log(`[${new Date().toISOString()}] Failed to fetch information via Invidious: ${err2.message}`);
-        try {
-          const info = await youtubedl(youtubeUrl, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            noCallHome: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            proxy: proxyUrl,
-            userAgent: userAgent,
-            noCheckCertificate: true,
-            geoBypass: true,
-            noPlaylist: true,
-            skipDownload: true
-          });
-          
-          return info;
-        } catch (err3) {
-          console.log(`[${new Date().toISOString()}] All attempts to fetch information failed`);
-          throw err3;
-        }
-      }
-    }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error fetching video information:`, error);
-    return { title: `YouTube Video - ${videoId || 'Unknown'}` };
-  }
-}
-
-// ----------------------------------------------------------------
-// Function to transcribe audio using Assembly AI
-// ----------------------------------------------------------------
-async function transcribeAudio(audioFilePath, fileId) {
-  try {
-    console.log(`[${new Date().toISOString()}] Starting transcription for ${fileId}`);
-    if (!ENABLE_TRANSCRIPTION || !ASSEMBLY_API_KEY || ASSEMBLY_API_KEY === 'YOUR_API_KEY_HERE') {
-      console.log(`[${new Date().toISOString()}] Transcription disabled or API key not configured`);
-      return {
-        success: false,
-        message: 'Transcription disabled or API key not configured'
-      };
-    }
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'uploading';
-      pendingTasks.set(fileId, taskInfo);
-    }
-    const audioFile = fs.readFileSync(audioFilePath);
-    const audioSize = fs.statSync(audioFilePath).size;
-    console.log(`[${new Date().toISOString()}] Audio file size: ${audioSize} bytes`);
-    const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Authorization': ASSEMBLY_API_KEY
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-    const audioUrl = uploadResponse.data.upload_url;
-    console.log(`[${new Date().toISOString()}] Audio successfully uploaded to Assembly AI: ${audioUrl}`);
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'processing';
-      pendingTasks.set(fileId, taskInfo);
-    }
-    const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
-      audio_url: audioUrl,
-      language_detection: true
-    }, {
-      headers: {
-        'Authorization': ASSEMBLY_API_KEY,
-        'Content-Type': 'application/json'
-      }
-    });
-    const transcriptId = transcriptResponse.data.id;
-    console.log(`[${new Date().toISOString()}] Transcription started with ID: ${transcriptId}`);
-    let transcriptResult;
-    let isCompleted = false;
-    while (!isCompleted) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      const checkResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+    if (streamResult.success) {
+      // Download the stream using axios
+      const tempStreamPath = path.join(TEMP_DIR, `${uuidv4()}.audio`);
+      
+      console.log(`[${new Date().toISOString()}] Downloading stream via axios to ${tempStreamPath}`);
+      
+      const writer = fs.createWriteStream(tempStreamPath);
+      const response = await axios({
+        method: 'get',
+        url: streamResult.url,
+        responseType: 'stream',
         headers: {
-          'Authorization': ASSEMBLY_API_KEY
+          'User-Agent': userAgent
         }
       });
-      const status = checkResponse.data.status;
-      console.log(`[${new Date().toISOString()}] Transcription status: ${status}`);
-      if (status === 'completed') {
-        isCompleted = true;
-        transcriptResult = checkResponse.data;
-      } else if (status === 'error') {
-        throw new Error(`Transcription error: ${checkResponse.data.error}`);
-      }
+      
+      response.data.pipe(writer);
+      
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+      
+      console.log(`[${new Date().toISOString()}] Stream downloaded, converting to MP3`);
+      
+      // Convert to MP3 using ffmpeg
+      const finalAudioPath = outputPath.replace(/\.\w+$/, '') + '.mp3';
+      
+      await new Promise((resolve, reject) => {
+        ffmpeg(tempStreamPath)
+          .outputOptions('-q:a', '0') // Best quality
+          .saveToFile(finalAudioPath)
+          .on('end', () => {
+            console.log(`[${new Date().toISOString()}] Conversion to MP3 completed`);
+            // Remove temporary file
+            try {
+              fs.unlinkSync(tempStreamPath);
+            } catch (err) {
+              console.error(`[${new Date().toISOString()}] Error removing temporary file:`, err);
+            }
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error(`[${new Date().toISOString()}] Error in conversion:`, err);
+            reject(err);
+          });
+      });
+      
+      console.log(`[${new Date().toISOString()}] Puppeteer approach completed successfully!`);
+      return { success: true };
+    } else {
+      console.log(`[${new Date().toISOString()}] Puppeteer approach failed: ${streamResult.error}`);
+      // Continue with other approaches
     }
-    const transcriptionText = transcriptResult.text;
-    const detectedLanguage = transcriptResult.language_code || 'Not detected';
-    const taskInfo = pendingTasks.get(fileId) || {};
-    const videoTitle = taskInfo.title || `YouTube Video - ${fileId}`;
-    const channel = taskInfo.channel || 'Unknown';
-    transcriptions.set(fileId, {
-      text: transcriptionText,
-      raw: transcriptResult,
-      language: detectedLanguage,
-      created: Date.now(),
-      expiresAt: Date.now() + EXPIRATION_TIME,
-      videoTitle,
-      channel
-    });
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'completed';
-      taskInfo.hasTranscription = true;
-      taskInfo.transcriptionUrl = `/transcription/${fileId}`;
-      taskInfo.detectedLanguage = detectedLanguage;
-      pendingTasks.set(fileId, taskInfo);
-    }
-    console.log(`[${new Date().toISOString()}] Transcription successfully completed for ${fileId} in language ${detectedLanguage}`);
-    return {
-      success: true,
-      transcription: transcriptionText,
-      language: detectedLanguage
-    };
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error in transcription:`, error.message);
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'failed';
-      taskInfo.transcriptionError = error.message;
-      pendingTasks.set(fileId, taskInfo);
-    }
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-// ----------------------------------------------------------------
-// Start the server
-// ----------------------------------------------------------------
-app.listen(PORT, () => {
-  console.log(`[${new Date().toISOString()}] Server running on port ${PORT}`);
-});
-
-// Export app for testing
-module.exports = app;
+  } catch (puppeteerError) {
+    console.log(`[${new Date().toISOString()}]

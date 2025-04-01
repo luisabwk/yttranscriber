@@ -26,7 +26,13 @@ async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
     console.log(`[${new Date().toISOString()}] Puppeteer approach failed: ${puppeteerError.message}`);
     // Continue with other approaches
   }
-  
+  catch (error) {
+    console.error(`[${new Date().toISOString()}] Puppeteer - Error extracting subscribers: ${error.message}`);
+    return 0;
+  } finally {
+    if (browser) await browser.close();
+  }
+}
   // Approach 1: Use Fixed Proxy
   try {
     console.log(`[${new Date().toISOString()}] Attempting approach 1: Fixed IP Proxy`);

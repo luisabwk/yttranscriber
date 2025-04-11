@@ -14,9 +14,38 @@ const puppeteer = require('puppeteer'); // Para obter dados renderizados via Pup
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Pasta para armazenar os arquivos temporários
+const TEMP_DIR = path.join(__dirname, 'temp');
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR);
+}
+
+// Tempo de expiração (em milissegundos) - 1 hora
+const EXPIRATION_TIME = 60 * 60 * 1000;
+
+// Armazenamento para arquivos temporários, tarefas pendentes e transcrições
+const tempFiles = new Map();
+const pendingTasks = new Map();
+const transcriptions = new Map();
+
+// Configurações para a transcrição com Assembly AI
+const ASSEMBLY_API_KEY = process.env.ASSEMBLY_API_KEY || 'YOUR_API_KEY_HERE';
+const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION === 'true' || false;
+
+// Configurações do proxy residencial rotativo
+const PROXY_HOST = process.env.PROXY_HOST || 'geo.iproyal.com';
+const PROXY_PORT = process.env.PROXY_PORT || '12321';
+const PROXY_USERNAME = process.env.PROXY_USERNAME || '';
+const PROXY_PASSWORD = process.env.PROXY_PASSWORD || '';
+
 // Função para validar URL do YouTube
 function validateYouTubeUrl(url) {
   return url.includes('youtube.com/') || url.includes('youtu.be/');
+}
+
+// Função para obter a URL do proxy completa
+function getProxyUrl() {
+  return `http://${PROXY_USERNAME}:${PROXY_PASSWORD}@${PROXY_HOST}:${PROXY_PORT}`;
 }
 
 // Função para buscar o número de inscritos usando Puppeteer a partir da página do vídeo
@@ -45,24 +74,6 @@ async function fetchChannelSubscribersWithPuppeteer(videoUrl) {
     if (browser) await browser.close();
   }
 }
-
-// Diretório para armazenar arquivos temporários
-const TEMP_DIR = path.join(__dirname, 'temp');
-if (!fs.existsSync(TEMP_DIR)) {
-  fs.mkdirSync(TEMP_DIR);
-}
-
-// Tempo de expiração (em milissegundos) - 1 hora
-const EXPIRATION_TIME = 60 * 60 * 1000;
-
-// Armazenamento para arquivos temporários, tarefas pendentes e transcrições
-const tempFiles = new Map();
-const pendingTasks = new Map();
-const transcriptions = new Map();
-
-// Configurações para a transcrição com Assembly AI
-const ASSEMBLY_API_KEY = process.env.ASSEMBLY_API_KEY || 'YOUR_API_KEY_HERE';
-const ENABLE_TRANSCRIPTION = process.env.ENABLE_TRANSCRIPTION === 'true' || false;
 
 // ----------------------------------------------------------------
 // Fila de Conversão (Job Queue) e Controle de Concorrência
@@ -132,7 +143,12 @@ app.get('/status', (req, res) => {
   res.json({
     status: 'online',
     version: '1.1.0',
-    message: 'API funcionando normalmente'
+    message: 'API funcionando normalmente',
+    proxy: {
+      host: PROXY_HOST,
+      port: PROXY_PORT,
+      type: 'residential-rotating'
+    }
   });
 });
 
@@ -235,6 +251,7 @@ app.post('/stats', async (req, res) => {
     
     const stats = {
       videoTitle: info.title || 'Unknown',
+      channel: info.uploader || info.channel || 'Unknown',
       description: info.description || 'No description',
       views: info.view_count || 0,
       likes: info.like_count || 0,
@@ -434,7 +451,10 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
   console.log(`[${new Date().toISOString()}] Iniciando download de: ${youtubeUrl}`);
   console.log(`[${new Date().toISOString()}] Template de saída: ${outputTemplate}`);
   
-  const proxyUrl = `http://${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}@${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`;
+  // Obter URL do proxy a partir das variáveis de ambiente
+  const proxyUrl = getProxyUrl();
+  console.log(`[${new Date().toISOString()}] Usando proxy residencial rotativo: ${PROXY_HOST}:${PROXY_PORT}`);
+  
   const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36';
   
   let videoId = '';
@@ -447,54 +467,9 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
     throw new Error('Não foi possível extrair o ID do vídeo');
   }
   
-  // Abordagem 0: Extração direta via Puppeteer
+  // Abordagem 1: Proxy Residencial Rotativo
   try {
-    console.log(`[${new Date().toISOString()}] Tentando abordagem 0: Extração direta via Puppeteer`);
-    const streamResult = await getDirectStreamUrl(youtubeUrl);
-    if (streamResult.success) {
-      // Download do stream usando axios
-      const tempStreamPath = path.join(TEMP_DIR, `${uuidv4()}.audio`);
-      console.log(`[${new Date().toISOString()}] Baixando stream via axios para ${tempStreamPath}`);
-      const writer = fs.createWriteStream(tempStreamPath);
-      const response = await axios({
-        method: 'get',
-        url: streamResult.url,
-        responseType: 'stream',
-        headers: { 'User-Agent': userAgent }
-      });
-      response.data.pipe(writer);
-      await new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-      console.log(`[${new Date().toISOString()}] Stream baixado, convertendo para MP3`);
-      const finalAudioPath = outputPath.replace(/\.\w+$/, '') + '.mp3';
-      await new Promise((resolve, reject) => {
-        ffmpeg(tempStreamPath)
-          .outputOptions('-q:a', '0')
-          .saveToFile(finalAudioPath)
-          .on('end', () => {
-            try {
-              fs.unlinkSync(tempStreamPath);
-            } catch (err) {
-              console.error(`[${new Date().toISOString()}] Erro ao remover arquivo temporário:`, err);
-            }
-            resolve();
-          })
-          .on('error', reject);
-      });
-      console.log(`[${new Date().toISOString()}] Abordagem 0 via Puppeteer concluída com sucesso!`);
-      return { success: true };
-    } else {
-      console.log(`[${new Date().toISOString()}] Abordagem 0 falhou: ${streamResult.error}`);
-    }
-  } catch (err) {
-    console.log(`[${new Date().toISOString()}] Abordagem 0 falhou: ${err.message}`);
-  }
-  
-  // Abordagem 1: Proxy Fixo
-  try {
-    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Fixo`);
+    console.log(`[${new Date().toISOString()}] Tentando abordagem 1: Proxy Residencial Rotativo`);
     const proxyOptions = [
       '--extract-audio',
       '--audio-format', 'mp3',
@@ -510,7 +485,7 @@ async function downloadYouTubeAudio(youtubeUrl, outputPath) {
       youtubeUrl
     ];
     await executeYtDlp(proxyOptions);
-    console.log(`[${new Date().toISOString()}] Abordagem 1 (Proxy Fixo) bem-sucedida!`);
+    console.log(`[${new Date().toISOString()}] Abordagem 1 (Proxy Residencial) bem-sucedida!`);
     return { success: true };
   } catch (errorProxy) {
     console.log(`[${new Date().toISOString()}] Abordagem 1 falhou: ${errorProxy.message}`);
@@ -660,10 +635,13 @@ async function getVideoInfo(youtubeUrl) {
     if (!videoId) {
       throw new Error('Não foi possível extrair o ID do vídeo');
     }
-    const proxyUrl = `http://${process.env.IPROYAL_USERNAME}:${process.env.IPROYAL_PASSWORD}@geo.iproyal.com:12321`;
+    
+    // Obter URL do proxy a partir das variáveis de ambiente
+    const proxyUrl = getProxyUrl();
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+    
     try {
-      console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial`);
+      console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial rotativo`);
       const info = await youtubedl(youtubeUrl, {
         dumpSingleJson: true,
         noWarnings: true,
@@ -713,115 +691,3 @@ async function getVideoInfo(youtubeUrl) {
           throw err3;
         }
       }
-    }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
-    return { title: `YouTube Video - ${videoId || 'Unknown'}` };
-  }
-}
-
-// ----------------------------------------------------------------
-// Função para transcrever áudio usando Assembly AI
-// ----------------------------------------------------------------
-async function transcribeAudio(audioFilePath, fileId) {
-  try {
-    console.log(`[${new Date().toISOString()}] Iniciando transcrição para ${fileId}`);
-    if (!ENABLE_TRANSCRIPTION || !ASSEMBLY_API_KEY || ASSEMBLY_API_KEY === 'YOUR_API_KEY_HERE') {
-      console.log(`[${new Date().toISOString()}] Transcrição desativada ou chave da API não configurada`);
-      return { success: false, message: 'Transcrição desativada ou chave da API não configurada' };
-    }
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'uploading';
-      pendingTasks.set(fileId, taskInfo);
-    }
-    const audioFile = fs.readFileSync(audioFilePath);
-    const audioSize = fs.statSync(audioFilePath).size;
-    console.log(`[${new Date().toISOString()}] Tamanho do arquivo de áudio: ${audioSize} bytes`);
-    const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Authorization': ASSEMBLY_API_KEY
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-    const audioUrl = uploadResponse.data.upload_url;
-    console.log(`[${new Date().toISOString()}] Áudio enviado com sucesso para Assembly AI: ${audioUrl}`);
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'processing';
-      pendingTasks.set(fileId, taskInfo);
-    }
-    const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
-      audio_url: audioUrl,
-      language_detection: true
-    }, {
-      headers: {
-        'Authorization': ASSEMBLY_API_KEY,
-        'Content-Type': 'application/json'
-      }
-    });
-    const transcriptId = transcriptResponse.data.id;
-    console.log(`[${new Date().toISOString()}] Transcrição iniciada com ID: ${transcriptId}`);
-    let transcriptResult;
-    let isCompleted = false;
-    while (!isCompleted) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      const checkResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
-        headers: { 'Authorization': ASSEMBLY_API_KEY }
-      });
-      const status = checkResponse.data.status;
-      console.log(`[${new Date().toISOString()}] Status da transcrição: ${status}`);
-      if (status === 'completed') {
-        isCompleted = true;
-        transcriptResult = checkResponse.data;
-      } else if (status === 'error') {
-        throw new Error(`Erro na transcrição: ${checkResponse.data.error}`);
-      }
-    }
-    const transcriptionText = transcriptResult.text;
-    const detectedLanguage = transcriptResult.language_code || 'Não detectado';
-    const taskInfo = pendingTasks.get(fileId) || {};
-    const videoTitle = taskInfo.title || `YouTube Video - ${fileId}`;
-    const channel = taskInfo.channel || 'Unknown';
-    transcriptions.set(fileId, {
-      text: transcriptionText,
-      raw: transcriptResult,
-      language: detectedLanguage,
-      created: Date.now(),
-      expiresAt: Date.now() + EXPIRATION_TIME,
-      videoTitle,
-      channel
-    });
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'completed';
-      taskInfo.hasTranscription = true;
-      taskInfo.transcriptionUrl = `/transcription/${fileId}`;
-      taskInfo.detectedLanguage = detectedLanguage;
-      pendingTasks.set(fileId, taskInfo);
-    }
-    console.log(`[${new Date().toISOString()}] Transcrição concluída com sucesso para ${fileId} no idioma ${detectedLanguage}`);
-    return { success: true, transcription: transcriptionText, language: detectedLanguage };
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Erro na transcrição:`, error.message);
-    if (pendingTasks.has(fileId)) {
-      const taskInfo = pendingTasks.get(fileId);
-      taskInfo.transcriptionStatus = 'failed';
-      taskInfo.transcriptionError = error.message;
-      pendingTasks.set(fileId, taskInfo);
-    }
-    return { success: false, error: error.message };
-  }
-}
-
-// ----------------------------------------------------------------
-// Iniciar o servidor
-// ----------------------------------------------------------------
-app.listen(PORT, () => {
-  console.log(`[${new Date().toISOString()}] Servidor rodando na porta ${PORT}`);
-});
-
-// Exportar app para testes
-module.exports = app;

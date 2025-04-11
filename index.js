@@ -640,9 +640,10 @@ async function getVideoInfo(youtubeUrl) {
     const proxyUrl = getProxyUrl();
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     
+    // Tentativa 1: Proxy Residencial
     try {
       console.log(`[${new Date().toISOString()}] Tentando obter informações via proxy residencial rotativo`);
-      const info = await youtubedl(youtubeUrl, {
+      return await youtubedl(youtubeUrl, {
         dumpSingleJson: true,
         noWarnings: true,
         noCallHome: true,
@@ -652,42 +653,233 @@ async function getVideoInfo(youtubeUrl) {
         geoBypass: true,
         noPlaylist: true
       });
-      return info;
     } catch (err) {
       console.log(`[${new Date().toISOString()}] Falha ao obter informações via proxy residencial: ${err.message}`);
-      try {
-        console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
-        const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
-        const info = await youtubedl(invidiousUrl, {
-          dumpSingleJson: true,
-          noWarnings: true,
-          noCallHome: true,
-          proxy: proxyUrl,
-          userAgent: userAgent,
-          noCheckCertificate: true,
-          geoBypass: true,
-          noPlaylist: true
-        });
-        return info;
-      } catch (err2) {
-        console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err2.message}`);
-        try {
-          const info = await youtubedl(youtubeUrl, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            noCallHome: true,
-            preferFreeFormats: true,
-            youtubeSkipDashManifest: true,
-            proxy: proxyUrl,
-            userAgent: userAgent,
-            noCheckCertificate: true,
-            geoBypass: true,
-            noPlaylist: true,
-            skipDownload: true
-          });
-          return info;
-        } catch (err3) {
-          console.log(`[${new Date().toISOString()}] Todas as tentativas de obter informações falharam`);
-          throw err3;
-        }
+    }
+    
+    // Tentativa 2: Invidious
+    try {
+      console.log(`[${new Date().toISOString()}] Tentando obter informações via Invidious`);
+      const invidiousUrl = `https://yewtu.be/watch?v=${videoId}`;
+      return await youtubedl(invidiousUrl, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        noCallHome: true,
+        proxy: proxyUrl,
+        userAgent: userAgent,
+        noCheckCertificate: true,
+        geoBypass: true,
+        noPlaylist: true
+      });
+    } catch (err) {
+      console.log(`[${new Date().toISOString()}] Falha ao obter informações via Invidious: ${err.message}`);
+    }
+    
+    // Tentativa 3: Configurações Avançadas
+    try {
+      return await youtubedl(youtubeUrl, {
+        dumpSingleJson: true,
+        noWarnings: true,
+        noCallHome: true,
+        preferFreeFormats: true,
+        youtubeSkipDashManifest: true,
+        proxy: proxyUrl,
+        userAgent: userAgent,
+        noCheckCertificate: true,
+        geoBypass: true,
+        noPlaylist: true,
+        skipDownload: true
+      });
+    } catch (err) {
+      console.log(`[${new Date().toISOString()}] Todas as tentativas de obter informações falharam`);
+      throw new Error('Não foi possível obter informações do vídeo após todas as tentativas');
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro ao obter informações do vídeo:`, error);
+    throw error;
+  }
+}
+
+// ----------------------------------------------------------------
+// Função para transcrição de áudio usando Assembly AI
+// ----------------------------------------------------------------
+async function transcribeAudio(audioPath, fileId) {
+  if (!ENABLE_TRANSCRIPTION || !ASSEMBLY_API_KEY || ASSEMBLY_API_KEY === 'YOUR_API_KEY_HERE') {
+    console.log(`[${new Date().toISOString()}] Transcrição desabilitada ou chave de API não configurada`);
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'failed';
+      taskInfo.transcriptionError = 'Transcrição desabilitada ou chave de API não configurada';
+      pendingTasks.set(fileId, taskInfo);
+    }
+    return { success: false, error: 'Transcrição desabilitada ou chave de API não configurada' };
+  }
+
+  try {
+    console.log(`[${new Date().toISOString()}] Iniciando processo de transcrição para ${fileId}`);
+    
+    // Atualizar status da tarefa
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'processing';
+      pendingTasks.set(fileId, taskInfo);
+    }
+    
+    // Criar um stream de leitura do arquivo de áudio
+    const audioFile = fs.createReadStream(audioPath);
+    
+    // Upload do arquivo para Assembly AI
+    console.log(`[${new Date().toISOString()}] Enviando arquivo de áudio para Assembly AI`);
+    const uploadResponse = await axios.post('https://api.assemblyai.com/v2/upload', audioFile, {
+      headers: {
+        'Authorization': ASSEMBLY_API_KEY,
+        'Content-Type': 'application/octet-stream'
       }
+    });
+    
+    if (!uploadResponse.data || !uploadResponse.data.upload_url) {
+      throw new Error('Falha ao fazer upload do arquivo para Assembly AI');
+    }
+    
+    const audioUrl = uploadResponse.data.upload_url;
+    console.log(`[${new Date().toISOString()}] Upload bem-sucedido, URL: ${audioUrl}`);
+    
+    // Iniciar o job de transcrição
+    console.log(`[${new Date().toISOString()}] Iniciando job de transcrição`);
+    const transcriptResponse = await axios.post('https://api.assemblyai.com/v2/transcript', {
+      audio_url: audioUrl,
+      language_detection: true
+    }, {
+      headers: {
+        'Authorization': ASSEMBLY_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!transcriptResponse.data || !transcriptResponse.data.id) {
+      throw new Error('Falha ao iniciar job de transcrição');
+    }
+    
+    const transcriptId = transcriptResponse.data.id;
+    console.log(`[${new Date().toISOString()}] Job de transcrição iniciado, ID: ${transcriptId}`);
+    
+    // Verificar status da transcrição periodicamente
+    let transcriptResult = null;
+    const maxAttempts = 60; // Aprox. 10 minutos (10s * 60)
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      attempts++;
+      await new Promise(resolve => setTimeout(resolve, 10000)); // Esperar 10 segundos entre as verificações
+      
+      const statusResponse = await axios.get(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+        headers: {
+          'Authorization': ASSEMBLY_API_KEY
+        }
+      });
+      
+      const status = statusResponse.data.status;
+      const language = statusResponse.data.language || 'unknown';
+      
+      console.log(`[${new Date().toISOString()}] Status da transcrição: ${status}, Tentativa: ${attempts}, Idioma detectado: ${language}`);
+      
+      if (pendingTasks.has(fileId)) {
+        const taskInfo = pendingTasks.get(fileId);
+        taskInfo.detectedLanguage = language;
+        pendingTasks.set(fileId, taskInfo);
+      }
+      
+      if (status === 'completed') {
+        transcriptResult = statusResponse.data;
+        break;
+      } else if (status === 'error') {
+        throw new Error(`Erro na transcrição: ${statusResponse.data.error || 'Erro desconhecido'}`);
+      }
+    }
+    
+    if (!transcriptResult) {
+      throw new Error('Tempo limite excedido para a transcrição');
+    }
+    
+    console.log(`[${new Date().toISOString()}] Transcrição concluída com sucesso`);
+    
+    // Atualizar status da tarefa
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'completed';
+      taskInfo.hasTranscription = true;
+      taskInfo.transcriptionUrl = `/transcription/${fileId}`;
+      pendingTasks.set(fileId, taskInfo);
+      
+      // Obter informações do vídeo para associar à transcrição
+      let videoTitle = taskInfo.title || `YouTube Video - ${fileId}`;
+      let channel = taskInfo.channel || 'Unknown';
+      
+      // Salvar transcrição no armazenamento em memória
+      transcriptions.set(fileId, {
+        text: transcriptResult.text,
+        language: transcriptResult.language,
+        created: Date.now(),
+        expiresAt: Date.now() + EXPIRATION_TIME,
+        videoTitle: videoTitle,
+        channel: channel
+      });
+    }
+    
+    return { success: true, transcription: transcriptResult.text, language: transcriptResult.language };
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Erro na transcrição:`, error);
+    if (pendingTasks.has(fileId)) {
+      const taskInfo = pendingTasks.get(fileId);
+      taskInfo.transcriptionStatus = 'failed';
+      taskInfo.transcriptionError = error.message;
+      pendingTasks.set(fileId, taskInfo);
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+// ----------------------------------------------------------------
+// Iniciar o servidor
+// ----------------------------------------------------------------
+app.listen(PORT, () => {
+  console.log(`[${new Date().toISOString()}] Servidor iniciado na porta ${PORT}`);
+  console.log(`[${new Date().toISOString()}] Transcrição ${ENABLE_TRANSCRIPTION ? 'habilitada' : 'desabilitada'}`);
+  console.log(`[${new Date().toISOString()}] Proxy configurado: ${PROXY_HOST}:${PROXY_PORT}`);
+  console.log(`[${new Date().toISOString()}] Diretório temporário: ${TEMP_DIR}`);
+});
+
+// Configurar limpeza automática de arquivos temporários a cada hora
+setInterval(() => {
+  console.log(`[${new Date().toISOString()}] Iniciando limpeza automática de arquivos expirados`);
+  const now = Date.now();
+  
+  // Limpar arquivos temporários
+  for (const [fileId, fileInfo] of tempFiles.entries()) {
+    if (now > fileInfo.expiresAt) {
+      console.log(`[${new Date().toISOString()}] Removendo arquivo expirado: ${fileId}`);
+      if (fs.existsSync(fileInfo.path)) {
+        fs.unlinkSync(fileInfo.path);
+      }
+      tempFiles.delete(fileId);
+    }
+  }
+  
+  // Limpar tarefas pendentes
+  for (const [taskId, taskInfo] of pendingTasks.entries()) {
+    if (taskInfo.created + EXPIRATION_TIME < now) {
+      console.log(`[${new Date().toISOString()}] Removendo tarefa expirada: ${taskId}`);
+      pendingTasks.delete(taskId);
+    }
+  }
+  
+  // Limpar transcrições
+  for (const [transcriptId, transcriptInfo] of transcriptions.entries()) {
+    if (transcriptInfo.expiresAt < now) {
+      console.log(`[${new Date().toISOString()}] Removendo transcrição expirada: ${transcriptId}`);
+      transcriptions.delete(transcriptId);
+    }
+  }
+  
+  console.log(`[${new Date().toISOString()}] Limpeza automática concluída`);
+}, 60 * 60 * 1000); // 1 hora
